@@ -1,17 +1,19 @@
-#include <QGuiApplication>
+#include <QtWidgets/QApplication>
 #include <QQmlApplicationEngine>
+#include <QQmlContext>
+#include "signalgenerator.h"
 
-int main(int argc, char *argv[])
-{
-    QGuiApplication app(argc, argv);
+int main(int argc, char *argv[]) {
+    QApplication app(argc, argv);
 
+    SignalGenerator generator;
     QQmlApplicationEngine engine;
 
-    QObject::connect(&engine, &QQmlApplicationEngine::objectCreationFailed,
-                     &app, []() { QCoreApplication::exit(-1); },
-                     Qt::QueuedConnection);
+    // Inject the generator into the QML context
+    engine.rootContext()->setContextProperty("signalGenerator", &generator);
 
-    engine.loadFromModule("crs_dso", "Main");
+    const QUrl url(u"qrc:/crs_dso/qml/Main.qml"_qs);
+    engine.load(url);
 
     return app.exec();
 }
