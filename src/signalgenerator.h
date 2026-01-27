@@ -14,6 +14,7 @@ public:
 
     // Updated to accept a channel index (0 or 1)
     Q_INVOKABLE void updateSeries(int channel, QAbstractSeries *series);
+    Q_INVOKABLE void setTriggerLevel(double level) { m_triggerLevel = level; }
 
 private slots:
     void generateData();
@@ -24,6 +25,7 @@ private:
     QXYSeries *m_series2 = nullptr; // Channel 2
     double m_index = 0;
     const int m_maxPoints = 2000;
+    double m_triggerLevel = 1.5; // Default trigger at 1.5V
 };
 
 #endif
