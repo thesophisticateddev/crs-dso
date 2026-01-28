@@ -199,14 +199,14 @@ Window {
 
                             background: Rectangle {
                                 color: "#3d3d3d"
-                                border.color: currentIndex === 0 ? "#00ff00" : "#00ffff"
+                                border.color: triggerSourceCombo.currentIndex === 0 ? "#00ff00" : "#00ffff"
                                 border.width: 2
                                 radius: 4
                             }
 
                             contentItem: Text {
                                 text: triggerSourceCombo.displayText
-                                color: currentIndex === 0 ? "#00ff00" : "#00ffff"
+                                color: triggerSourceCombo.currentIndex === 0 ? "#00ff00" : "#00ffff"
                                 font.bold: true
                                 verticalAlignment: Text.AlignVCenter
                                 leftPadding: 8
