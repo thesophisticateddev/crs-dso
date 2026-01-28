@@ -18,3 +18,59 @@ src/crs-dso
 
 Qt online docs
 https://doc.qt.io/
+
+
+  Running the Program
+
+  Development Build (using presets)
+
+  cd /home/Salman/projects/crs-dso
+  cmake --preset default
+  cmake --build --preset default
+  ./build/src/crs-dso
+
+  Manual Build
+
+  cd /home/Salman/projects/crs-dso
+  mkdir build && cd build
+  cmake ../
+  make
+  ./src/crs-dso
+
+  Release Build
+
+  cmake --preset release
+  cmake --build --preset release
+  ./build-release/src/crs-dso
+
+  ---
+  Cross-Platform Builds
+
+  Since this is a Qt6 application, you'll need to use Qt's deployment tools to create standalone builds:
+
+  Linux
+
+  cmake --preset release && cmake --build --preset release
+  # Use linuxdeployqt (install from https://github.com/probonopd/linuxdeployqt)
+  linuxdeployqt build-release/src/crs-dso -qmldir=src/qml -appimage
+
+  Windows
+
+  cmake --preset release
+  cmake --build --preset release
+  windeployqt --qmldir src\qml build-release\src\crs-dso.exe
+
+  macOS
+
+  cmake --preset release
+  cmake --build --preset release
+  macdeployqt build-release/src/crs-dso.app -qmldir=src/qml -dmg
+
+  ---
+  Requirements
+
+  - Qt 6.5+ with Quick and Charts modules
+  - CMake 3.16+
+  - Ninja (used by the presets) or Make
+
+  The project currently doesn't have deployment scripts, so you may want to create platform-specific build scripts if you frequently build for distribution.
