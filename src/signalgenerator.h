@@ -3,29 +3,52 @@
 
 #include <QObject>
 #include <QTimer>
+#include <QThread>
+#include <QPointF>
+#include <QList>
 #include <QtCharts/QXYSeries>
 #include <cmath>
 
-class SignalGenerator : public QObject
-{
+// --- The Worker: Runs in the background thread ---
+class SignalWorker : public QObject {
+    Q_OBJECT
+public:
+    SignalWorker() = default;
+
+public slots:
+    void generateData();
+    void setTriggerLevel(double l) { m_triggerLevel = l; }
+    void setChannels(bool c1, bool c2) { m_ch1Active = c1; m_ch2Active = c2; }
+
+signals:
+    void dataReady(int channel, const QList<QPointF> &points);
+
+private:
+    double m_index = 0;
+    double m_triggerLevel = 1.5;
+    bool m_ch1Active = false;
+    bool m_ch2Active = false;
+};
+
+// --- The Generator: Stays in the UI thread for QML ---
+class SignalGenerator : public QObject {
     Q_OBJECT
 public:
     explicit SignalGenerator(QObject *parent = nullptr);
+    ~SignalGenerator();
 
-    // Updated to accept a channel index (0 or 1)
-    Q_INVOKABLE void updateSeries(int channel, QAbstractSeries *series);
-    Q_INVOKABLE void setTriggerLevel(double level) { m_triggerLevel = level; }
+    // QML-facing methods
+    Q_INVOKABLE void setTriggerLevel(double level);
+    Q_INVOKABLE void registerSeries(int channel, QXYSeries *series);
 
 private slots:
-    void generateData();
+    void handleDataReady(int channel, const QList<QPointF> &points);
 
 private:
-    QTimer *m_timer;
-    QXYSeries *m_series1 = nullptr; // Channel 1
-    QXYSeries *m_series2 = nullptr; // Channel 2
-    double m_index = 0;
-    const int m_maxPoints = 2000;
-    double m_triggerLevel = 1.5; // Default trigger at 1.5V
+    QThread m_workerThread;
+    SignalWorker *m_worker;
+    QXYSeries *m_series1 = nullptr;
+    QXYSeries *m_series2 = nullptr;
 };
 
 #endif

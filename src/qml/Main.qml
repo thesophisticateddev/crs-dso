@@ -46,9 +46,9 @@ Window {
                 name: "CH 1"
                 axisX: axisX
                 axisY: axisY
-                color: "#00ff00" // Green
-                useOpenGL: true  // Better performance for live data
-                Component.onCompleted: signalGenerator.updateSeries(0,chan1)
+                color: "#00ff00"
+                useOpenGL: true
+                // Removed updateSeries here to keep threading clean
             }
 
             LineSeries {
@@ -56,12 +56,10 @@ Window {
                 name: "CH 2"
                 axisX: axisX
                 axisY: axisY
-                color: "#00ffff" // Cyan
+                color: "#00ffff"
                 useOpenGL: true
-                Component.onCompleted: signalGenerator.updateSeries(1,chan2)
             }
 
-            // The actual Trigger Line
             LineSeries {
                 id: triggerLine
                 name: "Trigger"
@@ -69,27 +67,27 @@ Window {
                 axisY: axisY
                 color: "yellow"
                 width: 1
-                style: Qt.DashLine // Makes it look distinct from signals
-
-                // Initial position (horizontal line at 0V)
-                XYPoint { x: 0; y: 1.5 }
-                XYPoint { x: 400; y: 1.5 }
+                style: Qt.DashLine
+                // Match the axisX.max so it spans the whole screen
+                XYPoint { id: pStart; x: 0; y: 1.5 }
+                XYPoint { id: pEnd; x: 1000; y: 1.5 }
             }
 
-            // Overlay to handle dragging the trigger level
+
             MouseArea {
+                id: triggerMouseArea // Add an ID
                 anchors.fill: parent
                 drag.target: triggerHandle
                 drag.axis: Drag.YAxis
 
-                // Visual handle on the right side
                 Rectangle {
                     id: triggerHandle
                     width: 20; height: 20
+                    // Ensure it's on the right edge
                     x: parent.width - 25
-                    y: chartView.toPixels(Qt.point(0, 1.5)).y - 10 // Start at 1.5V
+                    y: chartView.mapToPosition(Qt.point(0, 1.5)).y - 10
                     color: "yellow"
-                    rotation: 45 // Diamond shape
+                    rotation: 45
 
                     Text {
                         text: "T"
@@ -100,29 +98,34 @@ Window {
                     }
 
                     onYChanged: {
-                        if (drag.active) {
-                            // Convert pixel position back to Voltage value
-                            var point = chartView.toValue(Qt.point(0, y + 10))
-                            updateTriggerLevel(point.y)
+                        if (triggerMouseArea.drag.active) {
+                            // mapToValue is the modern, preferred method [cite: 23]
+                            var point = chartView.mapToValue(Qt.point(0, y + 10)) /*[cite: 23]*/
+                            updateTriggerLevel(point.y) /*[cite: 24]*/
                         }
                     }
                 }
             }
 
             function updateTriggerLevel(val) {
-                // Snap the trigger line to the new voltage value
-                triggerLine.replace(0, 0, val)
-                triggerLine.replace(1, axisX.max, val)
+                // 1. Check for valid number to prevent further errors
+                if (isNaN(val)) return;
 
-                // Push the new trigger level to C++ backend
+                // 2. Update properties directly. No 'replace' function needed!
+                pStart.y = val
+                pEnd.y = val
+
+                // Ensure the line always touches the right edge even if timebase changes
+                pEnd.x = axisX.max
+
+                // 3. Notify C++ worker
                 signalGenerator.setTriggerLevel(val)
             }
 
             Component.onCompleted: {
-                // Assuming your backend updateSeries can be called twice
-                // or you have a modified function for multiple channels
-                signalGenerator.updateSeries(chan1)
-                // signalGenerator.updateSeries2(chan2) // Add this to your C++ later
+                // Register the series with the signal generator for direct C++ updates
+                signalGenerator.registerSeries(0, chan1)
+                signalGenerator.registerSeries(1, chan2)
             }
         }
 

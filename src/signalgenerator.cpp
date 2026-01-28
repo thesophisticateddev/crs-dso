@@ -1,83 +1,115 @@
 #include "signalgenerator.h"
-#include <QPointF>
-#include <QList>
 
 SignalGenerator::SignalGenerator(QObject *parent) : QObject(parent) {
-    m_timer = new QTimer(this);
-    connect(m_timer, &QTimer::timeout, this, &SignalGenerator::generateData);
-    m_timer->start(16);
+    m_worker = new SignalWorker();
+    m_worker->moveToThread(&m_workerThread);
+
+    // Connect worker's data signal to our handler (queued connection for thread safety)
+    connect(m_worker, &SignalWorker::dataReady, this, &SignalGenerator::handleDataReady, Qt::QueuedConnection);
+
+    // Setup the timer to live on the worker thread
+    QTimer *timer = new QTimer();
+    timer->setInterval(16); // ~60 FPS
+    timer->moveToThread(&m_workerThread);
+
+    // Connect timer to worker's processing function
+    connect(timer, &QTimer::timeout, m_worker, &SignalWorker::generateData);
+
+    // Start/Stop logic
+    connect(&m_workerThread, &QThread::started, timer, [=](){ timer->start(); });
+    connect(&m_workerThread, &QThread::finished, timer, &QObject::deleteLater);
+    connect(&m_workerThread, &QThread::finished, m_worker, &QObject::deleteLater);
+
+    m_workerThread.start();
 }
 
-void SignalGenerator::updateSeries(int channel, QAbstractSeries *series) {
-    if (channel == 0)
-        m_series1 = static_cast<QXYSeries *>(series);
-    else if (channel == 1)
-        m_series2 = static_cast<QXYSeries *>(series);
+SignalGenerator::~SignalGenerator() {
+    m_workerThread.quit();
+    m_workerThread.wait();
 }
 
-void SignalGenerator::generateData() {
-    // Safety check: if no series are linked, don't waste CPU
-    if (!m_series1 && !m_series2) return;
+void SignalGenerator::registerSeries(int channel, QXYSeries *series) {
+    if (channel == 0) {
+        m_series1 = series;
+        QMetaObject::invokeMethod(m_worker, "setChannels",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(bool, true),
+                                  Q_ARG(bool, m_series2 != nullptr));
+    } else if (channel == 1) {
+        m_series2 = series;
+        QMetaObject::invokeMethod(m_worker, "setChannels",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(bool, m_series1 != nullptr),
+                                  Q_ARG(bool, true));
+    }
+}
 
-    const int internalBufferLimit = 10000; // Simulated high-speed raw buffer
-    const int targetPoints = 400;         // UI display points
-    const int bucketSize = 20;            // (internalBufferLimit / targetPoints) if not triggering
+void SignalGenerator::handleDataReady(int channel, const QList<QPointF> &points) {
+    // Update series directly in UI thread - this is thread-safe
+    if (channel == 0 && m_series1) {
+        m_series1->replace(points);
+    } else if (channel == 1 && m_series2) {
+        m_series2->replace(points);
+    }
+}
 
-    // 1. Find the Trigger Point on Channel 1 (Rising Edge)
-    int triggerStartIndex = 0;
+void SignalGenerator::setTriggerLevel(double level) {
+    // Push the new trigger level to the worker thread
+    QMetaObject::invokeMethod(m_worker, "setTriggerLevel",
+                              Qt::QueuedConnection,
+                              Q_ARG(double, level));
+}
+
+// --- Worker Logic ---
+void SignalWorker::generateData() {
+    if (!m_ch1Active && !m_ch2Active) return;
+
+    const int targetPoints = 400;
+    const int internalBuffer = 10000;
+    const int bucketSize = 20;
+
+    // 1. Trigger Search
+    int triggerIdx = 0;
     bool triggered = false;
-
-    // We search the 'raw' data stream for the trigger event
-    for (int i = 1; i < (internalBufferLimit - targetPoints); ++i) {
-        double prevY = std::sin(0.05 * (i - 1) + m_index);
-        double currY = std::sin(0.05 * i + m_index);
-
-        if (prevY < m_triggerLevel && currY >= m_triggerLevel) {
-            triggerStartIndex = i;
+    for (int i = 1; i < (internalBuffer - targetPoints); ++i) {
+        double prev = std::sin(0.05 * (i - 1) + m_index);
+        double curr = std::sin(0.05 * i + m_index);
+        if (prev < m_triggerLevel && curr >= m_triggerLevel) {
+            triggerIdx = i;
             triggered = true;
             break;
         }
     }
+    if (!triggered) triggerIdx = 0;
 
-    // If we can't find a trigger (e.g. signal is too low),
-    // real scopes usually 'Auto' trigger at 0 to keep the display moving.
-    if (!triggered) triggerStartIndex = 0;
+    // 2. Data Generation with Decimation
+    QList<QPointF> points1, points2;
+    if (m_ch1Active) points1.reserve(targetPoints);
+    if (m_ch2Active) points2.reserve(targetPoints);
 
-    QList<QPointF> points1;
-    QList<QPointF> points2;
-    points1.reserve(targetPoints);
-    points2.reserve(targetPoints);
-
-    // 2. Perform Min-Max Decimation for both channels starting from the trigger
     for (int b = 0; b < targetPoints; ++b) {
-        double x = b;
-
-        // CH1 Decimation
-        if (m_series1) {
-            double min1 = 100.0, max1 = -100.0;
+        if (m_ch1Active) {
+            double maxV = -100.0, minV = 100.0;
             for (int j = 0; j < bucketSize; ++j) {
-                double val = std::sin(0.05 * (triggerStartIndex + b * bucketSize + j) + m_index);
-                if (val < min1) min1 = val;
-                if (val > max1) max1 = val;
+                double v = std::sin(0.05 * (triggerIdx + b * bucketSize + j) + m_index);
+                if (v > maxV) maxV = v;
+                if (v < minV) minV = v;
             }
-            points1.append(QPointF(x, (b % 2 == 0) ? max1 : min1));
+            points1.append(QPointF(b, (b % 2 == 0) ? maxV : minV));
         }
-
-        // CH2 Decimation (using the same trigger time-base)
-        if (m_series2) {
-            double min2 = 100.0, max2 = -100.0;
+        if (m_ch2Active) {
+            double maxV = -100.0, minV = 100.0;
             for (int j = 0; j < bucketSize; ++j) {
-                double val = std::cos(0.03 * (triggerStartIndex + b * bucketSize + j) + (m_index * 0.5));
-                if (val < min2) min2 = val;
-                if (val > max2) max2 = val;
+                double v = std::cos(0.03 * (triggerIdx + b * bucketSize + j) + (m_index * 0.5));
+                if (v > maxV) maxV = v;
+                if (v < minV) minV = v;
             }
-            points2.append(QPointF(x, (b % 2 == 0) ? max2 : min2));
+            points2.append(QPointF(b, (b % 2 == 0) ? maxV : minV));
         }
     }
 
-    // 3. Update the UI
-    if (m_series1) m_series1->replace(points1);
-    if (m_series2) m_series2->replace(points2);
+    if (m_ch1Active) emit dataReady(0, points1);
+    if (m_ch2Active) emit dataReady(1, points2);
 
-    m_index += 0.1; // Progress simulation time
+    m_index += 0.1;
 }
