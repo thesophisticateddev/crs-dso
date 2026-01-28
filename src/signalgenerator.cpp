@@ -54,35 +54,104 @@ void SignalGenerator::handleDataReady(int channel, const QList<QPointF> &points)
 }
 
 void SignalGenerator::setTriggerLevel(double level) {
-    // Push the new trigger level to the worker thread
-    QMetaObject::invokeMethod(m_worker, "setTriggerLevel",
-                              Qt::QueuedConnection,
-                              Q_ARG(double, level));
+    if (m_triggerLevel != level) {
+        m_triggerLevel = level;
+        QMetaObject::invokeMethod(m_worker, "setTriggerLevel",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(double, level));
+        emit triggerLevelChanged();
+    }
+}
+
+void SignalGenerator::setTriggerSource(int channel) {
+    if (m_triggerSource != channel) {
+        m_triggerSource = channel;
+        QMetaObject::invokeMethod(m_worker, "setTriggerSource",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(int, channel));
+        emit triggerSourceChanged();
+    }
+}
+
+void SignalGenerator::setTriggerEdge(int edge) {
+    if (m_triggerEdge != edge) {
+        m_triggerEdge = edge;
+        QMetaObject::invokeMethod(m_worker, "setTriggerEdge",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(int, edge));
+        emit triggerEdgeChanged();
+    }
+}
+
+void SignalGenerator::setRunning(bool running) {
+    if (m_running != running) {
+        m_running = running;
+        QMetaObject::invokeMethod(m_worker, "setRunning",
+                                  Qt::QueuedConnection,
+                                  Q_ARG(bool, running));
+        emit runningChanged();
+    }
 }
 
 // --- Worker Logic ---
+
+double SignalWorker::generateCh1Sample(int idx) {
+    return std::sin(0.05 * idx + m_index);
+}
+
+double SignalWorker::generateCh2Sample(int idx) {
+    return std::cos(0.03 * idx + (m_index * 0.5));
+}
+
+double SignalWorker::generateSample(int channel, int idx) {
+    if (channel == 0) {
+        return generateCh1Sample(idx);
+    } else {
+        return generateCh2Sample(idx);
+    }
+}
+
+int SignalWorker::findTriggerPoint(int bufferSize, int displayPoints) {
+    // Pre-trigger: show 25% of data before trigger point
+    const int preTriggerPoints = displayPoints / 4;
+    const int searchStart = preTriggerPoints;
+    const int searchEnd = bufferSize - displayPoints;
+
+    for (int i = searchStart; i < searchEnd; ++i) {
+        double prev = generateSample(m_triggerSource, i - 1);
+        double curr = generateSample(m_triggerSource, i);
+
+        bool triggered = false;
+        if (m_triggerEdge == 0) {
+            // Rising edge: signal crosses from below to above trigger level
+            triggered = (prev < m_triggerLevel && curr >= m_triggerLevel);
+        } else {
+            // Falling edge: signal crosses from above to below trigger level
+            triggered = (prev > m_triggerLevel && curr <= m_triggerLevel);
+        }
+
+        if (triggered) {
+            // Return index adjusted for pre-trigger display
+            return i - preTriggerPoints;
+        }
+    }
+
+    // No trigger found, return 0 (free-running mode)
+    return 0;
+}
+
 void SignalWorker::generateData() {
+    if (!m_running) return;
     if (!m_ch1Active && !m_ch2Active) return;
 
     const int targetPoints = 400;
     const int internalBuffer = 10000;
     const int bucketSize = 20;
 
-    // 1. Trigger Search
-    int triggerIdx = 0;
-    bool triggered = false;
-    for (int i = 1; i < (internalBuffer - targetPoints); ++i) {
-        double prev = std::sin(0.05 * (i - 1) + m_index);
-        double curr = std::sin(0.05 * i + m_index);
-        if (prev < m_triggerLevel && curr >= m_triggerLevel) {
-            triggerIdx = i;
-            triggered = true;
-            break;
-        }
-    }
-    if (!triggered) triggerIdx = 0;
+    // Find trigger point using actual signal data
+    int triggerIdx = findTriggerPoint(internalBuffer, targetPoints * bucketSize);
 
-    // 2. Data Generation with Decimation
+    // Data Generation with Decimation
     QList<QPointF> points1, points2;
     if (m_ch1Active) points1.reserve(targetPoints);
     if (m_ch2Active) points2.reserve(targetPoints);
@@ -91,7 +160,7 @@ void SignalWorker::generateData() {
         if (m_ch1Active) {
             double maxV = -100.0, minV = 100.0;
             for (int j = 0; j < bucketSize; ++j) {
-                double v = std::sin(0.05 * (triggerIdx + b * bucketSize + j) + m_index);
+                double v = generateCh1Sample(triggerIdx + b * bucketSize + j);
                 if (v > maxV) maxV = v;
                 if (v < minV) minV = v;
             }
@@ -100,7 +169,7 @@ void SignalWorker::generateData() {
         if (m_ch2Active) {
             double maxV = -100.0, minV = 100.0;
             for (int j = 0; j < bucketSize; ++j) {
-                double v = std::cos(0.03 * (triggerIdx + b * bucketSize + j) + (m_index * 0.5));
+                double v = generateCh2Sample(triggerIdx + b * bucketSize + j);
                 if (v > maxV) maxV = v;
                 if (v < minV) minV = v;
             }

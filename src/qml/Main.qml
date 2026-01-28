@@ -48,7 +48,6 @@ Window {
                 axisY: axisY
                 color: "#00ff00"
                 useOpenGL: true
-                // Removed updateSeries here to keep threading clean
             }
 
             LineSeries {
@@ -68,14 +67,12 @@ Window {
                 color: "yellow"
                 width: 1
                 style: Qt.DashLine
-                // Match the axisX.max so it spans the whole screen
-                XYPoint { id: pStart; x: 0; y: 1.5 }
-                XYPoint { id: pEnd; x: 1000; y: 1.5 }
+                XYPoint { id: pStart; x: 0; y: signalGenerator.triggerLevel }
+                XYPoint { id: pEnd; x: 1000; y: signalGenerator.triggerLevel }
             }
 
-
             MouseArea {
-                id: triggerMouseArea // Add an ID
+                id: triggerMouseArea
                 anchors.fill: parent
                 drag.target: triggerHandle
                 drag.axis: Drag.YAxis
@@ -83,9 +80,8 @@ Window {
                 Rectangle {
                     id: triggerHandle
                     width: 20; height: 20
-                    // Ensure it's on the right edge
                     x: parent.width - 25
-                    y: chartView.mapToPosition(Qt.point(0, 1.5)).y - 10
+                    y: chartView.mapToPosition(Qt.point(0, signalGenerator.triggerLevel)).y - 10
                     color: "yellow"
                     rotation: 45
 
@@ -99,31 +95,41 @@ Window {
 
                     onYChanged: {
                         if (triggerMouseArea.drag.active) {
-                            // mapToValue is the modern, preferred method [cite: 23]
-                            var point = chartView.mapToValue(Qt.point(0, y + 10)) /*[cite: 23]*/
-                            updateTriggerLevel(point.y) /*[cite: 24]*/
+                            var point = chartView.mapToValue(Qt.point(0, y + 10))
+                            chartView.updateTriggerLevel(point.y)
                         }
                     }
                 }
             }
 
             function updateTriggerLevel(val) {
-                // 1. Check for valid number to prevent further errors
                 if (isNaN(val)) return;
 
-                // 2. Update properties directly. No 'replace' function needed!
+                // Clamp to axis range
+                val = Math.max(axisY.min, Math.min(axisY.max, val))
+
+                // Update trigger line
                 pStart.y = val
                 pEnd.y = val
-
-                // Ensure the line always touches the right edge even if timebase changes
                 pEnd.x = axisX.max
 
-                // 3. Notify C++ worker
+                // Notify C++ and update UI
                 signalGenerator.setTriggerLevel(val)
             }
 
+            // Sync trigger handle position when level changes from control panel
+            Connections {
+                target: signalGenerator
+                function onTriggerLevelChanged() {
+                    if (!triggerMouseArea.drag.active) {
+                        triggerHandle.y = chartView.mapToPosition(Qt.point(0, signalGenerator.triggerLevel)).y - 10
+                        pStart.y = signalGenerator.triggerLevel
+                        pEnd.y = signalGenerator.triggerLevel
+                    }
+                }
+            }
+
             Component.onCompleted: {
-                // Register the series with the signal generator for direct C++ updates
                 signalGenerator.registerSeries(0, chan1)
                 signalGenerator.registerSeries(1, chan2)
             }
@@ -146,21 +152,157 @@ Window {
                     anchors.horizontalCenter: parent.horizontalCenter
                     spacing: 15
 
-                    Text {
-                        text: "MASTER TIMEBASE"
-                        color: "#fff"
-                        font.bold: true
+                    // --- Run/Stop ---
+                    Button {
+                        id: runStopBtn
+                        text: signalGenerator.running ? "STOP" : "RUN"
+                        highlighted: signalGenerator.running
+                        Layout.fillWidth: true
                         Layout.topMargin: 10
+                        onClicked: signalGenerator.setRunning(!signalGenerator.running)
+
+                        background: Rectangle {
+                            color: signalGenerator.running ? "#2e7d32" : "#c62828"
+                            radius: 4
+                        }
+
+                        contentItem: Text {
+                            text: runStopBtn.text
+                            color: "white"
+                            font.bold: true
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                        }
+                    }
+
+                    Rectangle { height: 1; Layout.fillWidth: true; color: "#444" }
+
+                    // --- Trigger Controls ---
+                    Text {
+                        text: "TRIGGER"
+                        color: "yellow"
+                        font.bold: true
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        Text { text: "Source:"; color: "#aaa"; font.pixelSize: 11 }
+
+                        ComboBox {
+                            id: triggerSourceCombo
+                            model: ["CH 1", "CH 2"]
+                            currentIndex: signalGenerator.triggerSource
+                            Layout.fillWidth: true
+                            onCurrentIndexChanged: signalGenerator.setTriggerSource(currentIndex)
+
+                            background: Rectangle {
+                                color: "#3d3d3d"
+                                border.color: currentIndex === 0 ? "#00ff00" : "#00ffff"
+                                border.width: 2
+                                radius: 4
+                            }
+
+                            contentItem: Text {
+                                text: triggerSourceCombo.displayText
+                                color: currentIndex === 0 ? "#00ff00" : "#00ffff"
+                                font.bold: true
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: 8
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        Text { text: "Edge:"; color: "#aaa"; font.pixelSize: 11 }
+
+                        ComboBox {
+                            id: triggerEdgeCombo
+                            model: ["Rising", "Falling"]
+                            currentIndex: signalGenerator.triggerEdge
+                            Layout.fillWidth: true
+                            onCurrentIndexChanged: signalGenerator.setTriggerEdge(currentIndex)
+
+                            background: Rectangle {
+                                color: "#3d3d3d"
+                                border.color: "yellow"
+                                border.width: 1
+                                radius: 4
+                            }
+
+                            contentItem: Text {
+                                text: triggerEdgeCombo.displayText
+                                color: "yellow"
+                                verticalAlignment: Text.AlignVCenter
+                                leftPadding: 8
+                            }
+                        }
                     }
 
                     ColumnLayout {
                         Layout.fillWidth: true
-                        Text { text: "Time/Div: " + hScale.value + " ms"; color: "#aaa"; font.pixelSize: 11 }
+                        Text {
+                            text: "Level: " + signalGenerator.triggerLevel.toFixed(2) + " V"
+                            color: "yellow"
+                            font.pixelSize: 11
+                        }
+                        Slider {
+                            id: triggerLevelSlider
+                            from: -5; to: 5
+                            value: signalGenerator.triggerLevel
+                            Layout.fillWidth: true
+                            onMoved: chartView.updateTriggerLevel(value)
+
+                            background: Rectangle {
+                                x: triggerLevelSlider.leftPadding
+                                y: triggerLevelSlider.topPadding + triggerLevelSlider.availableHeight / 2 - height / 2
+                                width: triggerLevelSlider.availableWidth
+                                height: 4
+                                radius: 2
+                                color: "#3d3d3d"
+
+                                Rectangle {
+                                    width: triggerLevelSlider.visualPosition * parent.width
+                                    height: parent.height
+                                    color: "yellow"
+                                    radius: 2
+                                }
+                            }
+
+                            handle: Rectangle {
+                                x: triggerLevelSlider.leftPadding + triggerLevelSlider.visualPosition * (triggerLevelSlider.availableWidth - width)
+                                y: triggerLevelSlider.topPadding + triggerLevelSlider.availableHeight / 2 - height / 2
+                                width: 16; height: 16
+                                radius: 8
+                                color: "yellow"
+                            }
+                        }
+                    }
+
+                    Rectangle { height: 1; Layout.fillWidth: true; color: "#444" }
+
+                    // --- Master Timebase ---
+                    Text {
+                        text: "TIMEBASE"
+                        color: "#fff"
+                        font.bold: true
+                    }
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Text { text: "Time/Div: " + hScale.value.toFixed(0) + " ms"; color: "#aaa"; font.pixelSize: 11 }
                         Slider {
                             id: hScale
                             from: 100; to: 5000; value: 1000
                             Layout.fillWidth: true
-                            onValueChanged: axisX.max = value
+                            onValueChanged: {
+                                axisX.max = value
+                                pEnd.x = value
+                            }
                         }
                     }
 
@@ -177,17 +319,21 @@ Window {
                         suffix: " V"
                         onValueChanged: {
                             if (value > vScale2.value) axisY.max = value
-                                axisY.min = -value
+                            axisY.min = -value
+                            // Update trigger slider range
+                            triggerLevelSlider.from = -value
+                            triggerLevelSlider.to = value
                         }
                     }
+
                     CheckBox {
                         text: "Show CH1"; checked: true; palette.windowText: "white"
                         onToggled: chan1.visible = checked
                     }
+
                     Rectangle { height: 1; Layout.fillWidth: true; color: "#444" }
 
                     // --- Channel 2 Controls ---
-
                     ControlStepper {
                         id: vScale2
                         label: "CH2 VOLTS/DIV"
@@ -198,7 +344,10 @@ Window {
                         suffix: " V"
                         onValueChanged: {
                             if (value > vScale1.value) axisY.max = value
-                                axisY.min = -value
+                            axisY.min = -value
+                            // Update trigger slider range
+                            triggerLevelSlider.from = -value
+                            triggerLevelSlider.to = value
                         }
                     }
 
@@ -207,21 +356,22 @@ Window {
                         onToggled: chan2.visible = checked
                     }
 
-                    Item { Layout.fillHeight: true; Layout.preferredHeight: 20 }
-
-                    Button {
-                        text: "RUN / STOP"
-                        highlighted: true
-                        Layout.fillWidth: true
-                    }
+                    Rectangle { height: 1; Layout.fillWidth: true; color: "#444" }
 
                     Button {
                         text: "AUTOSET"
                         Layout.fillWidth: true
                         onClicked: {
-                            vScale1.value = 5; vScale2.value = 5; hScale.value = 1000
+                            vScale1.value = 5
+                            vScale2.value = 5
+                            hScale.value = 1000
+                            signalGenerator.setTriggerLevel(0)
+                            signalGenerator.setTriggerSource(0)
+                            signalGenerator.setTriggerEdge(0)
                         }
                     }
+
+                    Item { Layout.fillHeight: true; Layout.preferredHeight: 20 }
                 }
             }
         }
