@@ -3,3 +3,4 @@ build/
 .vscode/
 build-release/
 dist/
+.caches/
