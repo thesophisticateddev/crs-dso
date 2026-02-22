@@ -67,8 +67,8 @@ Window {
                 color: "yellow"
                 width: 1
                 style: Qt.DashLine
-                XYPoint { id: pStart; x: 0; y: signalGenerator.triggerLevel }
-                XYPoint { id: pEnd; x: 1000; y: signalGenerator.triggerLevel }
+                XYPoint { x: 0; y: signalGenerator.triggerLevel }
+                XYPoint { x: 1000; y: signalGenerator.triggerLevel }
             }
 
             MouseArea {
@@ -95,7 +95,7 @@ Window {
 
                     onYChanged: {
                         if (triggerMouseArea.drag.active) {
-                            var point = chartView.mapToValue(Qt.point(0, y + 10))
+                            var point = chartView.mapToValue(Qt.point(x + 10, y + 10))
                             chartView.updateTriggerLevel(point.y)
                         }
                     }
@@ -108,10 +108,9 @@ Window {
                 // Clamp to axis range
                 val = Math.max(axisY.min, Math.min(axisY.max, val))
 
-                // Update trigger line
-                pStart.y = val
-                pEnd.y = val
-                pEnd.x = axisX.max
+                // Update trigger line using replace() for reliable chart repaint
+                triggerLine.replace(0, 0, val)
+                triggerLine.replace(1, axisX.max, val)
 
                 // Notify C++ and update UI
                 signalGenerator.setTriggerLevel(val)
@@ -123,9 +122,15 @@ Window {
                 function onTriggerLevelChanged() {
                     if (!triggerMouseArea.drag.active) {
                         triggerHandle.y = chartView.mapToPosition(Qt.point(0, signalGenerator.triggerLevel)).y - 10
-                        pStart.y = signalGenerator.triggerLevel
-                        pEnd.y = signalGenerator.triggerLevel
+                        triggerLine.replace(0, 0, signalGenerator.triggerLevel)
+                        triggerLine.replace(1, axisX.max, signalGenerator.triggerLevel)
                     }
+                }
+            }
+
+            onPlotAreaChanged: {
+                if (!triggerMouseArea.drag.active) {
+                    triggerHandle.y = chartView.mapToPosition(Qt.point(0, signalGenerator.triggerLevel)).y - 10
                 }
             }
 
@@ -301,7 +306,7 @@ Window {
                             Layout.fillWidth: true
                             onValueChanged: {
                                 axisX.max = value
-                                pEnd.x = value
+                                triggerLine.replace(1, value, signalGenerator.triggerLevel)
                             }
                         }
                     }

@@ -2,10 +2,14 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QThread>
+#include <QIcon>
 #include "signalgenerator.h"
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
+
+    // Set application icon (works on all platforms)
+    app.setWindowIcon(QIcon(":/icons/crs-dso.png"));
 
     SignalGenerator generator; // This now stays in the UI thread
 

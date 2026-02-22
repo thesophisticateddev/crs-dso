@@ -1,0 +1,9 @@
+[Desktop Entry]
+Name=CRS-DSO
+Comment=Dual Channel Digital Sampling Oscilloscope
+Exec=crs-dso
+Icon=crs-dso
+Terminal=false
+Type=Application
+Categories=Science;Engineering;Electronics;
+Keywords=oscilloscope;signal;waveform;electronics;
