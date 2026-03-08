@@ -25,6 +25,9 @@ Window {
             legend.visible: true
             legend.alignment: Qt.AlignTop
 
+            property real ch1CursorLevel: 1.0
+            property real ch2CursorLevel: -1.0
+
             ValueAxis {
                 id: axisX
                 min: 0
@@ -71,66 +74,180 @@ Window {
                 XYPoint { x: 1000; y: signalGenerator.triggerLevel }
             }
 
-            MouseArea {
-                id: triggerMouseArea
-                anchors.fill: parent
-                drag.target: triggerHandle
-                drag.axis: Drag.YAxis
+            LineSeries {
+                id: ch1CursorLine
+                name: "C1"
+                axisX: axisX
+                axisY: axisY
+                color: "#00ff00"
+                width: 1
+                style: Qt.DotLine
+                XYPoint { x: 0; y: 1.0 }
+                XYPoint { x: 1000; y: 1.0 }
+            }
 
-                Rectangle {
-                    id: triggerHandle
-                    width: 20; height: 20
-                    x: parent.width - 25
-                    y: chartView.mapToPosition(Qt.point(0, signalGenerator.triggerLevel)).y - 10
-                    color: "yellow"
-                    rotation: 45
+            LineSeries {
+                id: ch2CursorLine
+                name: "C2"
+                axisX: axisX
+                axisY: axisY
+                color: "#00ffff"
+                width: 1
+                style: Qt.DotLine
+                XYPoint { x: 0; y: -1.0 }
+                XYPoint { x: 1000; y: -1.0 }
+            }
 
-                    Text {
-                        text: "T"
-                        anchors.centerIn: parent
-                        color: "black"
-                        rotation: -45
-                        font.bold: true
+            // --- Trigger Handle (right side, yellow) ---
+            Rectangle {
+                id: triggerHandle
+                width: 20; height: 20
+                x: parent.width - 25
+                y: chartView.mapToPosition(Qt.point(0, signalGenerator.triggerLevel)).y - 10
+                color: "yellow"
+                rotation: 45
+                z: 10
+
+                Text {
+                    text: "T"
+                    anchors.centerIn: parent
+                    color: "black"
+                    rotation: -45
+                    font.bold: true
+                }
+
+                onYChanged: {
+                    if (triggerDragArea.drag.active) {
+                        var point = chartView.mapToValue(Qt.point(x + 10, y + 10))
+                        chartView.updateTriggerLevel(point.y)
                     }
+                }
 
-                    onYChanged: {
-                        if (triggerMouseArea.drag.active) {
-                            var point = chartView.mapToValue(Qt.point(x + 10, y + 10))
-                            chartView.updateTriggerLevel(point.y)
-                        }
+                MouseArea {
+                    id: triggerDragArea
+                    anchors.fill: parent
+                    drag.target: parent
+                    drag.axis: Drag.YAxis
+                }
+            }
+
+            // --- CH1 Cursor Handle (left side, green) ---
+            Rectangle {
+                id: ch1CursorHandle
+                width: 20; height: 20
+                x: 5
+                y: chartView.mapToPosition(Qt.point(0, chartView.ch1CursorLevel)).y - 10
+                color: "#00ff00"
+                rotation: 45
+                z: 10
+
+                Text {
+                    text: "1"
+                    anchors.centerIn: parent
+                    color: "black"
+                    rotation: -45
+                    font.bold: true
+                    font.pixelSize: 10
+                }
+
+                onYChanged: {
+                    if (ch1CursorDragArea.drag.active) {
+                        var point = chartView.mapToValue(Qt.point(x + 10, y + 10))
+                        chartView.updateCh1Cursor(point.y)
                     }
+                }
+
+                MouseArea {
+                    id: ch1CursorDragArea
+                    anchors.fill: parent
+                    drag.target: parent
+                    drag.axis: Drag.YAxis
+                }
+            }
+
+            // --- CH2 Cursor Handle (left side, cyan, offset from CH1) ---
+            Rectangle {
+                id: ch2CursorHandle
+                width: 20; height: 20
+                x: 28
+                y: chartView.mapToPosition(Qt.point(0, chartView.ch2CursorLevel)).y - 10
+                color: "#00ffff"
+                rotation: 45
+                z: 10
+
+                Text {
+                    text: "2"
+                    anchors.centerIn: parent
+                    color: "black"
+                    rotation: -45
+                    font.bold: true
+                    font.pixelSize: 10
+                }
+
+                onYChanged: {
+                    if (ch2CursorDragArea.drag.active) {
+                        var point = chartView.mapToValue(Qt.point(x + 10, y + 10))
+                        chartView.updateCh2Cursor(point.y)
+                    }
+                }
+
+                MouseArea {
+                    id: ch2CursorDragArea
+                    anchors.fill: parent
+                    drag.target: parent
+                    drag.axis: Drag.YAxis
                 }
             }
 
             function updateTriggerLevel(val) {
                 if (isNaN(val)) return;
-
-                // Clamp to axis range
                 val = Math.max(axisY.min, Math.min(axisY.max, val))
-
-                // Update trigger line using replace() for reliable chart repaint
                 triggerLine.replace(0, 0, val)
                 triggerLine.replace(1, axisX.max, val)
-
-                // Notify C++ and update UI
                 signalGenerator.setTriggerLevel(val)
             }
 
-            // Sync trigger handle position when level changes from control panel
+            function updateCh1Cursor(val) {
+                if (isNaN(val)) return;
+                val = Math.max(axisY.min, Math.min(axisY.max, val))
+                ch1CursorLevel = val
+                ch1CursorLine.replace(0, 0, val)
+                ch1CursorLine.replace(1, axisX.max, val)
+                if (!ch1CursorDragArea.drag.active)
+                    ch1CursorHandle.y = mapToPosition(Qt.point(0, val)).y - 10
+            }
+
+            function updateCh2Cursor(val) {
+                if (isNaN(val)) return;
+                val = Math.max(axisY.min, Math.min(axisY.max, val))
+                ch2CursorLevel = val
+                ch2CursorLine.replace(0, 0, val)
+                ch2CursorLine.replace(1, axisX.max, val)
+                if (!ch2CursorDragArea.drag.active)
+                    ch2CursorHandle.y = mapToPosition(Qt.point(0, val)).y - 10
+            }
+
+            function repositionHandles() {
+                if (!triggerDragArea.drag.active)
+                    triggerHandle.y = mapToPosition(Qt.point(0, signalGenerator.triggerLevel)).y - 10
+                if (!ch1CursorDragArea.drag.active)
+                    ch1CursorHandle.y = mapToPosition(Qt.point(0, ch1CursorLevel)).y - 10
+                if (!ch2CursorDragArea.drag.active)
+                    ch2CursorHandle.y = mapToPosition(Qt.point(0, ch2CursorLevel)).y - 10
+            }
+
+            onPlotAreaChanged: {
+                repositionHandles()
+            }
+
             Connections {
                 target: signalGenerator
                 function onTriggerLevelChanged() {
-                    if (!triggerMouseArea.drag.active) {
+                    if (!triggerDragArea.drag.active) {
                         triggerHandle.y = chartView.mapToPosition(Qt.point(0, signalGenerator.triggerLevel)).y - 10
                         triggerLine.replace(0, 0, signalGenerator.triggerLevel)
                         triggerLine.replace(1, axisX.max, signalGenerator.triggerLevel)
                     }
-                }
-            }
-
-            onPlotAreaChanged: {
-                if (!triggerMouseArea.drag.active) {
-                    triggerHandle.y = chartView.mapToPosition(Qt.point(0, signalGenerator.triggerLevel)).y - 10
                 }
             }
 
@@ -307,6 +424,8 @@ Window {
                             onValueChanged: {
                                 axisX.max = value
                                 triggerLine.replace(1, value, signalGenerator.triggerLevel)
+                                ch1CursorLine.replace(1, value, chartView.ch1CursorLevel)
+                                ch2CursorLine.replace(1, value, chartView.ch2CursorLevel)
                             }
                         }
                     }
@@ -319,15 +438,16 @@ Window {
                         label: "CH1 VOLTS/DIV"
                         accentColor: "#00ff00"
                         value: 5.0
-                        step: 0.5
-                        min: 0.5; max: 20.0
                         suffix: " V"
+                        steps: [0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500,
+                                1.0, 2.0, 5.0, 10.0, 20.0]
                         onValueChanged: {
                             if (value > vScale2.value) axisY.max = value
                             axisY.min = -value
-                            // Update trigger slider range
                             triggerLevelSlider.from = -value
                             triggerLevelSlider.to = value
+                            axisY.labelFormat = (value < 1.0 || vScale2.value < 1.0) ? "%.3f V" : "%.1f V"
+                            Qt.callLater(chartView.repositionHandles)
                         }
                     }
 
@@ -344,21 +464,53 @@ Window {
                         label: "CH2 VOLTS/DIV"
                         accentColor: "#00ffff"
                         value: 5.0
-                        step: 0.5
-                        min: 0.5; max: 20.0
                         suffix: " V"
+                        steps: [0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500,
+                                1.0, 2.0, 5.0, 10.0, 20.0]
                         onValueChanged: {
                             if (value > vScale1.value) axisY.max = value
                             axisY.min = -value
-                            // Update trigger slider range
                             triggerLevelSlider.from = -value
                             triggerLevelSlider.to = value
+                            axisY.labelFormat = (value < 1.0 || vScale1.value < 1.0) ? "%.3f V" : "%.1f V"
+                            Qt.callLater(chartView.repositionHandles)
                         }
                     }
 
                     CheckBox {
                         text: "Show CH2"; checked: true; palette.windowText: "white"
                         onToggled: chan2.visible = checked
+                    }
+
+                    Rectangle { height: 1; Layout.fillWidth: true; color: "#444" }
+
+                    // --- Cursors ---
+                    Text {
+                        text: "CURSORS"
+                        color: "#fff"
+                        font.bold: true
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text { text: "C1:"; color: "#00ff00"; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 24 }
+                        Text { text: chartView.ch1CursorLevel.toFixed(3) + " V"; color: "#aaa"; font.pixelSize: 11 }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text { text: "C2:"; color: "#00ffff"; font.pixelSize: 11; font.bold: true; Layout.preferredWidth: 24 }
+                        Text { text: chartView.ch2CursorLevel.toFixed(3) + " V"; color: "#aaa"; font.pixelSize: 11 }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Text { text: "ΔV:"; color: "#fff"; font.pixelSize: 11; Layout.preferredWidth: 24 }
+                        Text {
+                            text: (chartView.ch1CursorLevel - chartView.ch2CursorLevel).toFixed(3) + " V"
+                            color: "#aaa"
+                            font.pixelSize: 11
+                        }
                     }
 
                     Rectangle { height: 1; Layout.fillWidth: true; color: "#444" }
@@ -373,6 +525,8 @@ Window {
                             signalGenerator.setTriggerLevel(0)
                             signalGenerator.setTriggerSource(0)
                             signalGenerator.setTriggerEdge(0)
+                            chartView.updateCh1Cursor(1.0)
+                            chartView.updateCh2Cursor(-1.0)
                         }
                     }
 
