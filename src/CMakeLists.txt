@@ -15,6 +15,27 @@ qt_add_executable(crs-dso
     main.cpp
     signalgenerator.h
     signalgenerator.cpp
+
+    # Transport layer
+    transport/ITransport.h
+    transport/MockTransport.h
+    transport/MockTransport.cpp
+
+    # Protocol layer
+    protocol/ProtocolDefs.h
+    protocol/Crc16.h
+    protocol/Crc16.cpp
+    protocol/ProtocolCodec.h
+    protocol/ProtocolCodec.cpp
+
+    # Core layer
+    core/WaveformBuffer.h
+    core/DeviceSettings.h
+    core/AcquisitionEngine.h
+    core/AcquisitionEngine.cpp
+    core/DeviceController.h
+    core/DeviceController.cpp
+
     ${PLATFORM_SOURCES}
     "${CMAKE_SOURCE_DIR}/icons/icons.qrc"
 )
@@ -30,8 +51,41 @@ qt_add_qml_module(crs-dso
         QtCharts    # Add this line
 )
 
-# This part is already correct in your snippet
+# Include paths for project sources
+target_include_directories(crs-dso PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
 target_link_libraries(crs-dso PRIVATE Qt6::Quick Qt6::Charts)
+
+# --- Conditional libusb / UsbTransport support ---
+if(HAS_LIBUSB)
+    target_sources(crs-dso PRIVATE
+        transport/UsbTransport.h
+        transport/UsbTransport.cpp
+    )
+    target_include_directories(crs-dso PRIVATE ${LIBUSB_INCLUDE_DIRS})
+    target_link_libraries(crs-dso PRIVATE ${LIBUSB_LIBRARIES})
+    target_compile_definitions(crs-dso PRIVATE HAS_LIBUSB)
+
+    # macOS: Link IOKit and CoreFoundation (required by libusb)
+    if(APPLE)
+        target_link_libraries(crs-dso PRIVATE
+            "-framework IOKit"
+            "-framework CoreFoundation"
+        )
+    endif()
+
+    # Windows: Copy libusb DLL to output directory
+    if(WIN32)
+        set(LIBUSB_DIR "${CMAKE_SOURCE_DIR}/third_party/libusb")
+        add_custom_command(TARGET crs-dso POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${LIBUSB_DIR}/MS64/dll/libusb-1.0.dll"
+                $<TARGET_FILE_DIR:crs-dso>
+        )
+    endif()
+endif()
 
 # macOS bundle configuration
 if(APPLE)

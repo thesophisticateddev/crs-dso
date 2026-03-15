@@ -1,0 +1,35 @@
+; driver/crs-dso.inf
+; Windows WinUSB driver for CRS-DSO Oscilloscope
+;
+[Version]
+Signature   = "$Windows NT$"
+Class       = USBDevice
+ClassGuid   = {88BAE032-5A81-49F0-BC3D-A4FF138216D6}
+Provider    = %ManufacturerName%
+CatalogFile = crs-dso.cat
+DriverVer   = 03/15/2026,1.0.0.0
+PnpLockdown = 1
+
+[Manufacturer]
+%ManufacturerName% = Standard,NTamd64
+
+[Standard.NTamd64]
+%DeviceName% = USB_Install, USB\VID_XXXX&PID_YYYY
+
+[USB_Install]
+Include = winusb.inf
+Needs   = WINUSB.NT
+
+[USB_Install.Services]
+Include = winusb.inf
+Needs   = WINUSB.NT.Services
+
+[USB_Install.HW]
+AddReg = Dev_AddReg
+
+[Dev_AddReg]
+HKR,,DeviceInterfaceGUIDs,0x10000,"{YOUR-GUID-HERE}"
+
+[Strings]
+ManufacturerName = "CRS Instruments"
+DeviceName       = "CRS-DSO Digital Storage Oscilloscope"

@@ -1,0 +1,11 @@
+# CRS-DSO Oscilloscope — USB permissions for non-root access
+# Install to: /etc/udev/rules.d/99-crs-dso.rules
+# Then run:   sudo udevadm control --reload-rules && sudo udevadm trigger
+#
+# Replace XXXX and YYYY with your actual Vendor ID and Product ID.
+
+# Grant read/write access to all users
+SUBSYSTEM=="usb", ATTR{idVendor}=="XXXX", ATTR{idProduct}=="YYYY", MODE="0666", TAG+="uaccess"
+
+# Optional: also create a symlink for easy identification
+SUBSYSTEM=="usb", ATTR{idVendor}=="XXXX", ATTR{idProduct}=="YYYY", SYMLINK+="crs-dso"
