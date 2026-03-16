@@ -2,7 +2,6 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtCharts
-import CRS.DSO 1.0
 
 ApplicationWindow {
     id: window
@@ -11,61 +10,6 @@ ApplicationWindow {
     visible: true
     title: qsTr("Dual Channel Digital Sampling Oscilloscope")
     color: "#1a1a1a"
-
-    // --- Mode state: true = signal generator emulation, false = hardware device ---
-    property bool testMode: true
-
-    // Helpers that route to the active backend
-    function activeRunning() {
-        return testMode ? signalGenerator.running : deviceController.running
-    }
-    function activeTriggerLevel() {
-        return testMode ? signalGenerator.triggerLevel : deviceController.triggerLevel / 1000.0
-    }
-
-    // --- DeviceController for hardware/mock mode ---
-    DeviceController {
-        id: deviceController
-
-        onWaveformUpdated: {
-            if (!testMode) {
-                var d1 = deviceController.ch1Data
-                var d2 = deviceController.ch2Data
-                if (d1.length > 0) chan1.replace(d1)
-                if (d2.length > 0) chan2.replace(d2)
-            }
-        }
-
-        onErrorMessage: function(msg) {
-            modeStatusText.text = "Error: " + msg
-        }
-
-        onStateChanged: {
-            if (!testMode)
-                modeStatusText.text = deviceController.state
-        }
-    }
-
-    // --- Device scan handler ---
-    Connections {
-        target: deviceController
-        function onDevicesScanned(devices) {
-            if (!testMode) {
-                if (devices.length === 0) {
-                    modeStatusText.text = "No devices found — using mock"
-                } else {
-                    deviceController.connectToDevice(0)
-                    modeStatusText.text = "Connecting..."
-                }
-            }
-        }
-        function onConnectionChanged() {
-            if (deviceController.connected)
-                modeStatusText.text = "Connected: " + deviceController.deviceName
-            else if (!testMode)
-                modeStatusText.text = "Disconnected"
-        }
-    }
 
     // --- Menu Bar ---
     menuBar: MenuBar {
@@ -80,43 +24,23 @@ ApplicationWindow {
             MenuItem {
                 text: qsTr("Test Mode (Signal Generator)")
                 checkable: true
-                checked: testMode
-                onTriggered: {
-                    if (!testMode) {
-                        testMode = true
-                        deviceController.stopAcquisition()
-                        deviceController.disconnect()
-                        signalGenerator.setRunning(true)
-                        signalGenerator.registerSeries(0, chan1)
-                        signalGenerator.registerSeries(1, chan2)
-                        modeStatusText.text = "Emulated oscilloscope"
-                    }
-                }
+                checked: scope.testMode
+                onTriggered: scope.testMode = true
             }
 
             MenuItem {
                 text: qsTr("Device Mode (Hardware)")
                 checkable: true
-                checked: !testMode
-                onTriggered: {
-                    if (testMode) {
-                        testMode = false
-                        signalGenerator.setRunning(false)
-                        modeStatusText.text = "Scanning for devices..."
-                        deviceController.scanDevices()
-                    }
-                }
+                checked: !scope.testMode
+                onTriggered: scope.testMode = false
             }
 
             MenuSeparator {}
 
             MenuItem {
                 text: qsTr("Scan for Devices")
-                enabled: !testMode
-                onTriggered: {
-                    modeStatusText.text = "Scanning..."
-                    deviceController.scanDevices()
-                }
+                enabled: !scope.testMode
+                onTriggered: scope.scanDevices()
             }
         }
 
@@ -124,35 +48,14 @@ ApplicationWindow {
             title: qsTr("&Acquisition")
 
             MenuItem {
-                text: qsTr("Start (Auto)")
-                enabled: !testMode && deviceController.connected
-                onTriggered: deviceController.startAcquisition(0)
+                text: qsTr("Start")
+                enabled: !scope.running
+                onTriggered: scope.running = true
             }
-            MenuItem {
-                text: qsTr("Start (Normal)")
-                enabled: !testMode && deviceController.connected
-                onTriggered: deviceController.startAcquisition(1)
-            }
-            MenuItem {
-                text: qsTr("Start (Single)")
-                enabled: !testMode && deviceController.connected
-                onTriggered: deviceController.startAcquisition(2)
-            }
-            MenuSeparator {}
             MenuItem {
                 text: qsTr("Stop")
-                enabled: !testMode && deviceController.running
-                onTriggered: deviceController.stopAcquisition()
-            }
-            MenuItem {
-                text: qsTr("Force Trigger")
-                enabled: !testMode && deviceController.running
-                onTriggered: deviceController.forceTrigger()
-            }
-            MenuItem {
-                text: qsTr("Auto Set")
-                enabled: !testMode && deviceController.connected
-                onTriggered: deviceController.autoSet()
+                enabled: scope.running
+                onTriggered: scope.running = false
             }
         }
     }
@@ -166,7 +69,7 @@ ApplicationWindow {
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 28
-            color: testMode ? "#1b3a1b" : "#1b2a3a"
+            color: scope.testMode ? "#1b3a1b" : "#1b2a3a"
 
             RowLayout {
                 anchors.fill: parent
@@ -176,20 +79,18 @@ ApplicationWindow {
 
                 Rectangle {
                     width: 10; height: 10; radius: 5
-                    color: testMode ? "#4caf50"
-                                    : (deviceController.connected ? "#2196f3" : "#f44336")
+                    color: scope.testMode ? "#4caf50" : "#2196f3"
                 }
 
                 Text {
-                    text: testMode ? "TEST MODE" : "DEVICE MODE"
-                    color: testMode ? "#81c784" : "#90caf9"
+                    text: scope.testMode ? "TEST MODE" : "DEVICE MODE"
+                    color: scope.testMode ? "#81c784" : "#90caf9"
                     font.pixelSize: 11
                     font.bold: true
                 }
 
                 Text {
-                    id: modeStatusText
-                    text: "Emulated oscilloscope"
+                    text: scope.statusText
                     color: "#999"
                     font.pixelSize: 11
                     Layout.fillWidth: true
@@ -217,12 +118,23 @@ ApplicationWindow {
                 property real ch1CursorLevel: 1.0
                 property real ch2CursorLevel: -1.0
 
+                // Fix #3: X-axis shows time, not samples
                 ValueAxis {
                     id: axisX
                     min: 0
-                    max: 1000
-                    labelFormat: "%.0f"
-                    titleText: "Samples"
+                    max: {
+                        var steps = scope.timebaseSteps()
+                        return steps[scope.timebaseIndex] * 10
+                    }
+                    labelFormat: {
+                        var total = max
+                        if (total < 1e-5)      return "%.0f ns"
+                        else if (total < 1e-2) return "%.0f us"
+                        else if (total < 10.0) return "%.0f ms"
+                        else                   return "%.1f s"
+                    }
+                    titleText: scope.timebaseLabel
+                    tickCount: 11
                 }
 
                 ValueAxis {
@@ -251,6 +163,7 @@ ApplicationWindow {
                     useOpenGL: true
                 }
 
+                // Fix #7: Trigger line bound to scope (mode-agnostic)
                 LineSeries {
                     id: triggerLine
                     name: "Trigger"
@@ -259,8 +172,8 @@ ApplicationWindow {
                     color: "yellow"
                     width: 1
                     style: Qt.DashLine
-                    XYPoint { x: 0; y: signalGenerator.triggerLevel }
-                    XYPoint { x: 1000; y: signalGenerator.triggerLevel }
+                    XYPoint { x: 0; y: scope.triggerLevel }
+                    XYPoint { x: axisX.max; y: scope.triggerLevel }
                 }
 
                 LineSeries {
@@ -272,7 +185,7 @@ ApplicationWindow {
                     width: 1
                     style: Qt.DotLine
                     XYPoint { x: 0; y: 1.0 }
-                    XYPoint { x: 1000; y: 1.0 }
+                    XYPoint { x: axisX.max; y: 1.0 }
                 }
 
                 LineSeries {
@@ -284,7 +197,7 @@ ApplicationWindow {
                     width: 1
                     style: Qt.DotLine
                     XYPoint { x: 0; y: -1.0 }
-                    XYPoint { x: 1000; y: -1.0 }
+                    XYPoint { x: axisX.max; y: -1.0 }
                 }
 
                 // --- Trigger Handle (right side, yellow) ---
@@ -292,7 +205,7 @@ ApplicationWindow {
                     id: triggerHandle
                     width: 20; height: 20
                     x: parent.width - 25
-                    y: chartView.mapToPosition(Qt.point(0, signalGenerator.triggerLevel)).y - 10
+                    y: chartView.mapToPosition(Qt.point(0, scope.triggerLevel)).y - 10
                     color: "yellow"
                     rotation: 45
                     z: 10
@@ -354,7 +267,7 @@ ApplicationWindow {
                     }
                 }
 
-                // --- CH2 Cursor Handle (left side, cyan, offset from CH1) ---
+                // --- CH2 Cursor Handle (left side, cyan) ---
                 Rectangle {
                     id: ch2CursorHandle
                     width: 20; height: 20
@@ -388,16 +301,13 @@ ApplicationWindow {
                     }
                 }
 
+                // Fix #7: Mode-agnostic trigger update
                 function updateTriggerLevel(val) {
                     if (isNaN(val)) return;
                     val = Math.max(axisY.min, Math.min(axisY.max, val))
                     triggerLine.replace(0, 0, val)
                     triggerLine.replace(1, axisX.max, val)
-                    if (testMode) {
-                        signalGenerator.setTriggerLevel(val)
-                    } else {
-                        deviceController.triggerLevel = Math.round(val * 1000)
-                    }
+                    scope.triggerLevel = val
                 }
 
                 function updateCh1Cursor(val) {
@@ -422,7 +332,7 @@ ApplicationWindow {
 
                 function repositionHandles() {
                     if (!triggerDragArea.drag.active)
-                        triggerHandle.y = mapToPosition(Qt.point(0, signalGenerator.triggerLevel)).y - 10
+                        triggerHandle.y = mapToPosition(Qt.point(0, scope.triggerLevel)).y - 10
                     if (!ch1CursorDragArea.drag.active)
                         ch1CursorHandle.y = mapToPosition(Qt.point(0, ch1CursorLevel)).y - 10
                     if (!ch2CursorDragArea.drag.active)
@@ -434,19 +344,25 @@ ApplicationWindow {
                 }
 
                 Connections {
-                    target: signalGenerator
-                    function onTriggerLevelChanged() {
+                    target: scope
+                    function onTriggerChanged() {
                         if (!triggerDragArea.drag.active) {
-                            triggerHandle.y = chartView.mapToPosition(Qt.point(0, signalGenerator.triggerLevel)).y - 10
-                            triggerLine.replace(0, 0, signalGenerator.triggerLevel)
-                            triggerLine.replace(1, axisX.max, signalGenerator.triggerLevel)
+                            triggerHandle.y = chartView.mapToPosition(Qt.point(0, scope.triggerLevel)).y - 10
+                            triggerLine.replace(0, 0, scope.triggerLevel)
+                            triggerLine.replace(1, axisX.max, scope.triggerLevel)
                         }
+                    }
+                    function onTimebaseChanged() {
+                        // Update cursor/trigger line endpoints when timebase changes
+                        triggerLine.replace(1, axisX.max, scope.triggerLevel)
+                        ch1CursorLine.replace(1, axisX.max, chartView.ch1CursorLevel)
+                        ch2CursorLine.replace(1, axisX.max, chartView.ch2CursorLevel)
                     }
                 }
 
                 Component.onCompleted: {
-                    signalGenerator.registerSeries(0, chan1)
-                    signalGenerator.registerSeries(1, chan2)
+                    scope.registerSeries(0, chan1)
+                    scope.registerSeries(1, chan2)
                 }
             }
 
@@ -467,28 +383,48 @@ ApplicationWindow {
                         anchors.horizontalCenter: parent.horizontalCenter
                         spacing: 15
 
+                        // --- Fix #6: Acquisition Mode Selector ---
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Layout.topMargin: 10
+                            spacing: 4
+
+                            Repeater {
+                                model: ["Auto", "Normal", "Single"]
+                                Button {
+                                    text: modelData
+                                    checked: scope.acquisitionMode === index
+                                    checkable: true
+                                    autoExclusive: true
+                                    Layout.fillWidth: true
+                                    onClicked: scope.acquisitionMode = index
+
+                                    background: Rectangle {
+                                        color: checked ? "#3d6fa5" : "#2d2d2d"
+                                        border.color: "#3d6fa5"
+                                        border.width: 1
+                                        radius: 3
+                                    }
+                                    contentItem: Text {
+                                        text: modelData
+                                        color: checked ? "white" : "#90caf9"
+                                        font.pixelSize: 10
+                                        horizontalAlignment: Text.AlignHCenter
+                                    }
+                                }
+                            }
+                        }
+
                         // --- Run/Stop ---
                         Button {
                             id: runStopBtn
-                            property bool isRunning: testMode ? signalGenerator.running
-                                                              : deviceController.running
-                            text: isRunning ? "STOP" : "RUN"
-                            highlighted: isRunning
+                            text: scope.running ? "STOP" : "RUN"
+                            highlighted: scope.running
                             Layout.fillWidth: true
-                            Layout.topMargin: 10
-                            onClicked: {
-                                if (testMode) {
-                                    signalGenerator.setRunning(!signalGenerator.running)
-                                } else {
-                                    if (deviceController.running)
-                                        deviceController.stopAcquisition()
-                                    else
-                                        deviceController.startAcquisition(0) // Auto mode
-                                }
-                            }
+                            onClicked: scope.running = !scope.running
 
                             background: Rectangle {
-                                color: runStopBtn.isRunning ? "#2e7d32" : "#c62828"
+                                color: scope.running ? "#2e7d32" : "#c62828"
                                 radius: 4
                             }
 
@@ -519,14 +455,9 @@ ApplicationWindow {
                             ComboBox {
                                 id: triggerSourceCombo
                                 model: ["CH 1", "CH 2"]
-                                currentIndex: signalGenerator.triggerSource
+                                currentIndex: scope.triggerSource
                                 Layout.fillWidth: true
-                                onCurrentIndexChanged: {
-                                    if (testMode)
-                                        signalGenerator.setTriggerSource(currentIndex)
-                                    else
-                                        deviceController.triggerSource = currentIndex
-                                }
+                                onCurrentIndexChanged: scope.triggerSource = currentIndex
 
                                 background: Rectangle {
                                     color: "#3d3d3d"
@@ -554,14 +485,9 @@ ApplicationWindow {
                             ComboBox {
                                 id: triggerEdgeCombo
                                 model: ["Rising", "Falling"]
-                                currentIndex: signalGenerator.triggerEdge
+                                currentIndex: scope.triggerEdge
                                 Layout.fillWidth: true
-                                onCurrentIndexChanged: {
-                                    if (testMode)
-                                        signalGenerator.setTriggerEdge(currentIndex)
-                                    else
-                                        deviceController.triggerEdge = currentIndex
-                                }
+                                onCurrentIndexChanged: scope.triggerEdge = currentIndex
 
                                 background: Rectangle {
                                     color: "#3d3d3d"
@@ -582,14 +508,14 @@ ApplicationWindow {
                         ColumnLayout {
                             Layout.fillWidth: true
                             Text {
-                                text: "Level: " + signalGenerator.triggerLevel.toFixed(2) + " V"
+                                text: "Level: " + scope.triggerLevel.toFixed(2) + " V"
                                 color: "yellow"
                                 font.pixelSize: 11
                             }
                             Slider {
                                 id: triggerLevelSlider
                                 from: -5; to: 5
-                                value: signalGenerator.triggerLevel
+                                value: scope.triggerLevel
                                 Layout.fillWidth: true
                                 onMoved: chartView.updateTriggerLevel(value)
 
@@ -621,25 +547,37 @@ ApplicationWindow {
 
                         Rectangle { height: 1; Layout.fillWidth: true; color: "#444" }
 
-                        // --- Master Timebase ---
+                        // --- Horizontal / Timebase ---
                         Text {
-                            text: "TIMEBASE"
+                            text: "HORIZONTAL"
                             color: "#fff"
                             font.bold: true
                         }
 
+                        // Fix #2: Standard 1-2-5 timebase stepper
+                        ControlStepper {
+                            id: timebaseStepper
+                            label: "TIME/DIV"
+                            accentColor: "#ffffff"
+                            value: scope.timebaseSteps()[scope.timebaseIndex]
+                            suffix: ""
+                            steps: scope.timebaseSteps()
+                            displayFormatter: function(v) { return scope.timebaseLabel }
+                            onValueChanged: scope.timebaseIndex = currentIndex
+                        }
+
+                        // Fix #6: Horizontal position
                         ColumnLayout {
                             Layout.fillWidth: true
-                            Text { text: "Time/Div: " + hScale.value.toFixed(0) + " ms"; color: "#aaa"; font.pixelSize: 11 }
+                            Text { text: "H. Position:"; color: "#aaa"; font.pixelSize: 11 }
                             Slider {
-                                id: hScale
-                                from: 100; to: 5000; value: 1000
+                                id: hPositionSlider
+                                from: -5; to: 5; value: 0
                                 Layout.fillWidth: true
-                                onValueChanged: {
-                                    axisX.max = value
-                                    triggerLine.replace(1, value, signalGenerator.triggerLevel)
-                                    ch1CursorLine.replace(1, value, chartView.ch1CursorLevel)
-                                    ch2CursorLine.replace(1, value, chartView.ch2CursorLevel)
+                                onMoved: {
+                                    var shift = value * scope.timebaseSteps()[scope.timebaseIndex]
+                                    axisX.min = shift
+                                    axisX.max = shift + scope.timebaseSteps()[scope.timebaseIndex] * 10
                                 }
                             }
                         }
@@ -647,62 +585,162 @@ ApplicationWindow {
                         Rectangle { height: 1; Layout.fillWidth: true; color: "#444" }
 
                         // --- Channel 1 ---
+                        Text {
+                            text: "CH1"
+                            color: "#00ff00"
+                            font.bold: true
+                        }
+
+                        // Fix #6: Coupling Selector (AC / DC / GND)
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 4
+
+                            Repeater {
+                                model: ["AC", "DC", "GND"]
+                                Button {
+                                    text: modelData
+                                    checked: scope.ch1Coupling === index
+                                    checkable: true
+                                    autoExclusive: true
+                                    Layout.fillWidth: true
+                                    onClicked: scope.ch1Coupling = index
+
+                                    background: Rectangle {
+                                        color: checked ? "#00ff00" : "#2d2d2d"
+                                        border.color: "#00ff00"
+                                        border.width: 1
+                                        radius: 3
+                                    }
+                                    contentItem: Text {
+                                        text: modelData
+                                        color: checked ? "black" : "#00ff00"
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        horizontalAlignment: Text.AlignHCenter
+                                    }
+                                }
+                            }
+                        }
+
                         ControlStepper {
                             id: vScale1
                             label: "CH1 VOLTS/DIV"
                             accentColor: "#00ff00"
-                            value: 5.0
+                            value: scope.voltsPerDivSteps()[scope.ch1VoltsIndex]
                             suffix: " V"
-                            steps: [0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500,
-                                    1.0, 2.0, 5.0, 10.0, 20.0]
+                            steps: scope.voltsPerDivSteps()
                             onValueChanged: {
-                                if (value > vScale2.value) axisY.max = value
-                                axisY.min = -value
-                                triggerLevelSlider.from = -value
-                                triggerLevelSlider.to = value
+                                scope.ch1VoltsIndex = currentIndex
+                                var maxV = Math.max(value, vScale2.value)
+                                axisY.max = maxV
+                                axisY.min = -maxV
+                                triggerLevelSlider.from = -maxV
+                                triggerLevelSlider.to = maxV
                                 axisY.labelFormat = (value < 1.0 || vScale2.value < 1.0) ? "%.3f V" : "%.1f V"
                                 Qt.callLater(chartView.repositionHandles)
-                                if (!testMode) deviceController.ch1VoltageRange = _stepIndex()
+                            }
+                        }
+
+                        // Fix #6: Channel offset (vertical position)
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: "Position:"; color: "#aaa"; font.pixelSize: 11 }
+                            Slider {
+                                id: ch1OffsetSlider
+                                from: -5.0; to: 5.0; value: scope.ch1Offset
+                                Layout.fillWidth: true
+                                onMoved: scope.ch1Offset = value
                             }
                         }
 
                         CheckBox {
                             id: ch1ShowCheck
-                            text: "Show CH1"; checked: true; palette.windowText: "white"
+                            text: "Show CH1"; checked: scope.ch1Enabled; palette.windowText: "white"
                             onToggled: {
                                 chan1.visible = checked
-                                if (!testMode) deviceController.ch1Enabled = checked
+                                scope.ch1Enabled = checked
                             }
                         }
 
                         Rectangle { height: 1; Layout.fillWidth: true; color: "#444" }
 
-                        // --- Channel 2 Controls ---
+                        // --- Channel 2 ---
+                        Text {
+                            text: "CH2"
+                            color: "#00ffff"
+                            font.bold: true
+                        }
+
+                        // Fix #6: Coupling Selector (AC / DC / GND)
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 4
+
+                            Repeater {
+                                model: ["AC", "DC", "GND"]
+                                Button {
+                                    text: modelData
+                                    checked: scope.ch2Coupling === index
+                                    checkable: true
+                                    autoExclusive: true
+                                    Layout.fillWidth: true
+                                    onClicked: scope.ch2Coupling = index
+
+                                    background: Rectangle {
+                                        color: checked ? "#00ffff" : "#2d2d2d"
+                                        border.color: "#00ffff"
+                                        border.width: 1
+                                        radius: 3
+                                    }
+                                    contentItem: Text {
+                                        text: modelData
+                                        color: checked ? "black" : "#00ffff"
+                                        font.pixelSize: 10
+                                        font.bold: true
+                                        horizontalAlignment: Text.AlignHCenter
+                                    }
+                                }
+                            }
+                        }
+
                         ControlStepper {
                             id: vScale2
                             label: "CH2 VOLTS/DIV"
                             accentColor: "#00ffff"
-                            value: 5.0
+                            value: scope.voltsPerDivSteps()[scope.ch2VoltsIndex]
                             suffix: " V"
-                            steps: [0.005, 0.010, 0.020, 0.050, 0.100, 0.200, 0.500,
-                                    1.0, 2.0, 5.0, 10.0, 20.0]
+                            steps: scope.voltsPerDivSteps()
                             onValueChanged: {
-                                if (value > vScale1.value) axisY.max = value
-                                axisY.min = -value
-                                triggerLevelSlider.from = -value
-                                triggerLevelSlider.to = value
+                                scope.ch2VoltsIndex = currentIndex
+                                var maxV = Math.max(value, vScale1.value)
+                                axisY.max = maxV
+                                axisY.min = -maxV
+                                triggerLevelSlider.from = -maxV
+                                triggerLevelSlider.to = maxV
                                 axisY.labelFormat = (value < 1.0 || vScale1.value < 1.0) ? "%.3f V" : "%.1f V"
                                 Qt.callLater(chartView.repositionHandles)
-                                if (!testMode) deviceController.ch2VoltageRange = _stepIndex()
+                            }
+                        }
+
+                        // Fix #6: Channel offset (vertical position)
+                        RowLayout {
+                            Layout.fillWidth: true
+                            Text { text: "Position:"; color: "#aaa"; font.pixelSize: 11 }
+                            Slider {
+                                id: ch2OffsetSlider
+                                from: -5.0; to: 5.0; value: scope.ch2Offset
+                                Layout.fillWidth: true
+                                onMoved: scope.ch2Offset = value
                             }
                         }
 
                         CheckBox {
                             id: ch2ShowCheck
-                            text: "Show CH2"; checked: true; palette.windowText: "white"
+                            text: "Show CH2"; checked: scope.ch2Enabled; palette.windowText: "white"
                             onToggled: {
                                 chan2.visible = checked
-                                if (!testMode) deviceController.ch2Enabled = checked
+                                scope.ch2Enabled = checked
                             }
                         }
 
@@ -743,16 +781,18 @@ ApplicationWindow {
                             text: "AUTOSET"
                             Layout.fillWidth: true
                             onClicked: {
-                                vScale1.value = 5
-                                vScale2.value = 5
-                                hScale.value = 1000
-                                if (testMode) {
-                                    signalGenerator.setTriggerLevel(0)
-                                    signalGenerator.setTriggerSource(0)
-                                    signalGenerator.setTriggerEdge(0)
-                                } else {
-                                    deviceController.autoSet()
-                                }
+                                scope.timebaseIndex = 12  // 1 ms/div
+                                scope.ch1VoltsIndex = 9   // 1 V/div
+                                scope.ch2VoltsIndex = 9
+                                scope.triggerLevel = 0
+                                scope.triggerSource = 0
+                                scope.triggerEdge = 0
+                                scope.ch1Offset = 0
+                                scope.ch2Offset = 0
+                                hPositionSlider.value = 0
+                                vScale1.value = scope.voltsPerDivSteps()[9]
+                                vScale2.value = scope.voltsPerDivSteps()[9]
+                                timebaseStepper.value = scope.timebaseSteps()[12]
                                 chartView.updateCh1Cursor(1.0)
                                 chartView.updateCh2Cursor(-1.0)
                             }

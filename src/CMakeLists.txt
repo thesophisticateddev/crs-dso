@@ -35,6 +35,8 @@ qt_add_executable(crs-dso
     core/AcquisitionEngine.cpp
     core/DeviceController.h
     core/DeviceController.cpp
+    core/ScopeController.h
+    core/ScopeController.cpp
 
     ${PLATFORM_SOURCES}
     "${CMAKE_SOURCE_DIR}/icons/icons.qrc"
@@ -56,7 +58,7 @@ target_include_directories(crs-dso PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_link_libraries(crs-dso PRIVATE Qt6::Quick Qt6::Charts)
+target_link_libraries(crs-dso PRIVATE Qt6::Quick Qt6::Charts Qt6::Concurrent)
 
 # --- Conditional libusb / UsbTransport support ---
 if(HAS_LIBUSB)

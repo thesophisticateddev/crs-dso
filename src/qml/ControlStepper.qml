@@ -16,6 +16,17 @@ ColumnLayout {
     // When non-empty, +/- steps through this list instead of using min/max/step
     property var steps: []
 
+    // Expose step index as a proper property (Fix #9)
+    property int currentIndex: {
+        for (var i = 0; i < steps.length; i++) {
+            if (Math.abs(steps[i] - value) < 1e-9) return i
+        }
+        return 0
+    }
+
+    // Optional: custom display formatter function
+    property var displayFormatter: null
+
     spacing: 5
     Layout.fillWidth: true
 
@@ -59,6 +70,8 @@ ColumnLayout {
             Text {
                 anchors.centerIn: parent
                 text: {
+                    if (root.displayFormatter)
+                        return root.displayFormatter(root.value)
                     if (root.value < 1.0)
                         return (root.value * 1000).toFixed(0) + " mV"
                     return root.value.toFixed(1) + root.suffix
