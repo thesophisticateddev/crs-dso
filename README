@@ -1,76 +1,54 @@
-CMake Qt6 Quick Template
-------------------------
+# CRS-DSO
 
-You need Qt6 and CMake 3.16 or higher
+CRS-DSO is a dual-channel desktop digital oscilloscope application built with C++17, Qt Quick, and Qt Charts. It supports both a built-in test signal generator and a USB hardware mode.
 
--- Build instructions --
+## Documentation
 
-cd /home/Salman/projects/crs-dso
-mkdir build
-cd build
-cmake ../
-make
+- [User Guide](docs/USER_GUIDE.md)
+- [Documentation Index](docs/README.md)
+- [Linux Build Instructions](docs/LINUX_BUILD.md)
+- [Windows Build Instructions](docs/WINDOWS_BUILD.md)
+- [macOS Build Instructions](docs/MACOS_BUILD.md)
 
-src/crs-dso
+## Features
 
+- Dual-channel waveform display
+- Test Mode for UI preview and demos
+- Device Mode for USB hardware acquisition
+- Trigger source, edge, and level controls
+- Timebase and per-channel volts/div controls
+- Horizontal and vertical positioning controls
+- Basic cursor-based voltage measurement
 
--- Tutorials and resources --
+## Quick Start
 
-Qt online docs
-https://doc.qt.io/
+### Run In Test Mode
 
+```bash
+cmake --preset default
+cmake --build --preset default
+./build/src/crs-dso
+```
 
-  Running the Program
+### Force Device-Mode Demo Path
 
-  Development Build (using presets)
+```bash
+./build/src/crs-dso --demoMode
+```
 
-  cd /home/Salman/projects/crs-dso
-  cmake --preset default
-  cmake --build --preset default
-  ./build/src/crs-dso
+## Build Requirements
 
-  Manual Build
+- Qt 6.5+ with Quick, Charts, and Concurrent
+- CMake 3.16+
+- C++17 compiler
+- `libusb-1.0` for USB hardware support
 
-  cd /home/Salman/projects/crs-dso
-  mkdir build && cd build
-  cmake ../
-  make
-  ./src/crs-dso
+If `libusb-1.0` is not available during configuration, CRS-DSO builds in mock-only mode.
 
-  Release Build
+## Linux Dependencies
 
-  cmake --preset release
-  cmake --build --preset release
-  ./build-release/src/crs-dso
+```bash
+sudo apt install build-essential cmake ninja-build qt6-base-dev qt6-declarative-dev qt6-charts-dev libusb-1.0-0-dev
+```
 
-  ---
-  Cross-Platform Builds
-
-  Since this is a Qt6 application, you'll need to use Qt's deployment tools to create standalone builds:
-
-  Linux
-
-  cmake --preset release && cmake --build --preset release
-  # Use linuxdeployqt (install from https://github.com/probonopd/linuxdeployqt)
-  linuxdeployqt build-release/src/crs-dso -qmldir=src/qml -appimage
-
-  Windows
-
-  cmake --preset release
-  cmake --build --preset release
-  windeployqt --qmldir src\qml build-release\src\crs-dso.exe
-
-  macOS
-
-  cmake --preset release
-  cmake --build --preset release
-  macdeployqt build-release/src/crs-dso.app -qmldir=src/qml -dmg
-
-  ---
-  Requirements
-
-  - Qt 6.5+ with Quick and Charts modules
-  - CMake 3.16+
-  - Ninja (used by the presets) or Make
-
-  The project currently doesn't have deployment scripts, so you may want to create platform-specific build scripts if you frequently build for distribution.
+For platform-specific packaging and build details, use the docs linked above.

@@ -25,4 +25,10 @@ struct DeviceSettings {
 
     // Acquisition mode
     uint8_t  acquisitionMode = 0;    // 0=Auto, 1=Normal, 2=Single
+
+    // Horizontal position & trigger expansion
+    double   horizontalPosition = 0.0;  // divisions of shift
+    double   preTriggerPercent = 25.0;  // pre-trigger window %
+    double   triggerHoldoff = 0.0;      // seconds
+    uint32_t recordLength = 0;          // 0 = auto from sampleRate + timebase
 };

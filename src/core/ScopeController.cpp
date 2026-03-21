@@ -13,7 +13,7 @@
 #include <QPointF>
 #include <cmath>
 
-// --- Fix #2: Standard 1-2-5 timebase sequence (in seconds) ---
+// --- Standard 1-2-5 timebase sequence (in seconds) ---
 const QVector<double> ScopeController::s_timebaseSteps = {
     // ns range
     5e-9, 10e-9, 20e-9, 50e-9, 100e-9, 200e-9, 500e-9,
@@ -25,7 +25,7 @@ const QVector<double> ScopeController::s_timebaseSteps = {
     1.0, 2.0, 5.0, 10.0
 };
 
-// --- Fix #2: Standard 1-2-5 volts/div sequence ---
+// --- Standard 1-2-5 volts/div sequence ---
 const QVector<double> ScopeController::s_voltsSteps = {
     1e-3, 2e-3, 5e-3,       // mV range
     10e-3, 20e-3, 50e-3,
@@ -48,7 +48,7 @@ ScopeController::~ScopeController() {
     }
 }
 
-// --- Series registration (Fix #4: direct series path) ---
+// --- Series registration ---
 
 void ScopeController::registerSeries(int channel, QXYSeries* series) {
     if (channel == 0) {
@@ -57,13 +57,12 @@ void ScopeController::registerSeries(int channel, QXYSeries* series) {
         m_series2 = series;
     }
 
-    // Forward to signal generator if in test mode
     if (m_testMode && m_signalGen) {
         m_signalGen->registerSeries(channel, series);
     }
 }
 
-// --- Fix #5: Async device scanning ---
+// --- Device scanning ---
 
 void ScopeController::scanDevices() {
     m_statusText = "Scanning for devices...";
@@ -172,7 +171,11 @@ QVariantList ScopeController::voltsPerDivSteps() const {
     return list;
 }
 
-// --- Fix #2: Timebase label formatting ---
+QStringList ScopeController::waveformTypes() const {
+    return {"Sine", "Square", "Triangle", "Sawtooth", "Pulse", "DC", "Noise"};
+}
+
+// --- Timebase label formatting ---
 
 QString ScopeController::timebaseLabel() const {
     double val = s_timebaseSteps[m_timebaseIndex];
@@ -190,7 +193,11 @@ QString ScopeController::statusText() const { return m_statusText; }
 int ScopeController::triggerSource() const { return m_triggerSource; }
 int ScopeController::triggerEdge() const { return m_triggerEdge; }
 double ScopeController::triggerLevel() const { return m_triggerLevel; }
+double ScopeController::triggerHoldoff() const { return m_triggerHoldoff; }
+double ScopeController::preTriggerPercent() const { return m_preTriggerPercent; }
+QString ScopeController::triggerStatus() const { return m_triggerStatus; }
 int ScopeController::timebaseIndex() const { return m_timebaseIndex; }
+double ScopeController::horizontalPosition() const { return m_horizontalPosition; }
 bool ScopeController::ch1Enabled() const { return m_ch1Enabled; }
 int ScopeController::ch1VoltsIndex() const { return m_ch1VoltsIndex; }
 int ScopeController::ch1Coupling() const { return m_ch1Coupling; }
@@ -200,6 +207,27 @@ int ScopeController::ch2VoltsIndex() const { return m_ch2VoltsIndex; }
 int ScopeController::ch2Coupling() const { return m_ch2Coupling; }
 double ScopeController::ch2Offset() const { return m_ch2Offset; }
 int ScopeController::acquisitionMode() const { return m_acquisitionMode; }
+
+// Simulation config getters
+int ScopeController::ch1Waveform() const { return static_cast<int>(m_ch1SimConfig.waveform); }
+double ScopeController::ch1Amplitude() const { return m_ch1SimConfig.amplitude; }
+double ScopeController::ch1Frequency() const { return m_ch1SimConfig.frequency; }
+double ScopeController::ch1Phase() const { return m_ch1SimConfig.phase; }
+double ScopeController::ch1DcOffset() const { return m_ch1SimConfig.dcOffset; }
+double ScopeController::ch1DutyCycle() const { return m_ch1SimConfig.dutyCycle; }
+double ScopeController::ch1Noise() const { return m_ch1SimConfig.noise; }
+
+int ScopeController::ch2Waveform() const { return static_cast<int>(m_ch2SimConfig.waveform); }
+double ScopeController::ch2Amplitude() const { return m_ch2SimConfig.amplitude; }
+double ScopeController::ch2Frequency() const { return m_ch2SimConfig.frequency; }
+double ScopeController::ch2Phase() const { return m_ch2SimConfig.phase; }
+double ScopeController::ch2DcOffset() const { return m_ch2SimConfig.dcOffset; }
+double ScopeController::ch2DutyCycle() const { return m_ch2SimConfig.dutyCycle; }
+double ScopeController::ch2Noise() const { return m_ch2SimConfig.noise; }
+
+// Capability flags
+bool ScopeController::supportsWaveformEditor() const { return m_testMode; }
+bool ScopeController::supportsForceTrigger() const { return true; }
 
 // --- Setters ---
 
@@ -288,16 +316,55 @@ void ScopeController::setTriggerLevel(double v) {
     emit triggerChanged();
 }
 
+void ScopeController::setTriggerHoldoff(double v) {
+    if (qFuzzyCompare(m_triggerHoldoff, v)) return;
+    m_triggerHoldoff = v;
+    if (m_testMode && m_signalGen) {
+        m_signalGen->setTriggerHoldoff(v);
+    }
+    emit triggerChanged();
+}
+
+void ScopeController::setPreTriggerPercent(double v) {
+    if (qFuzzyCompare(m_preTriggerPercent, v)) return;
+    m_preTriggerPercent = v;
+    if (m_testMode && m_signalGen) {
+        m_signalGen->setPreTriggerPercent(v);
+    }
+    emit triggerChanged();
+}
+
+void ScopeController::forceTrigger() {
+    if (m_testMode && m_signalGen) {
+        m_signalGen->forceTrigger();
+    } else if (m_engine) {
+        m_engine->forceTrigger();
+    }
+}
+
 void ScopeController::setTimebaseIndex(int v) {
     if (v < 0 || v >= s_timebaseSteps.size()) return;
     if (m_timebaseIndex == v) return;
     m_timebaseIndex = v;
-    if (!m_testMode && m_engine) {
-        double secs = s_timebaseSteps[v];
+
+    double secs = s_timebaseSteps[v];
+
+    if (m_testMode && m_signalGen) {
+        m_signalGen->setTimebaseSeconds(secs);
+    } else if (m_engine) {
         uint32_t nsPerDiv = static_cast<uint32_t>(secs * 1e9);
         m_engine->setTimebase(nsPerDiv);
     }
     emit timebaseChanged();
+}
+
+void ScopeController::setHorizontalPosition(double v) {
+    if (qFuzzyCompare(m_horizontalPosition, v)) return;
+    m_horizontalPosition = v;
+    if (m_testMode && m_signalGen) {
+        m_signalGen->setHorizontalPosition(v);
+    }
+    emit horizontalChanged();
 }
 
 void ScopeController::setCh1Enabled(bool v) {
@@ -327,8 +394,11 @@ void ScopeController::setCh1Coupling(int v) {
 void ScopeController::setCh1Offset(double v) {
     if (qFuzzyCompare(m_ch1Offset, v)) return;
     m_ch1Offset = v;
-    if (!m_testMode && m_engine)
+    if (m_testMode && m_signalGen) {
+        m_signalGen->setCh1Offset(v);
+    } else if (m_engine) {
         m_engine->setChannelOffset(0, static_cast<int16_t>(v * 1000));
+    }
     emit channelChanged();
 }
 
@@ -359,18 +429,126 @@ void ScopeController::setCh2Coupling(int v) {
 void ScopeController::setCh2Offset(double v) {
     if (qFuzzyCompare(m_ch2Offset, v)) return;
     m_ch2Offset = v;
-    if (!m_testMode && m_engine)
+    if (m_testMode && m_signalGen) {
+        m_signalGen->setCh2Offset(v);
+    } else if (m_engine) {
         m_engine->setChannelOffset(1, static_cast<int16_t>(v * 1000));
+    }
     emit channelChanged();
 }
 
 void ScopeController::setAcquisitionMode(int v) {
     if (m_acquisitionMode == v) return;
     m_acquisitionMode = v;
+    if (m_testMode && m_signalGen) {
+        m_signalGen->setAcquisitionMode(v);
+    }
     emit acquisitionModeChanged();
 }
 
-// --- Fix #4: Direct series update from waveform buffer ---
+// --- Simulation config setters (CH1) ---
+
+void ScopeController::setCh1Waveform(int v) {
+    if (static_cast<int>(m_ch1SimConfig.waveform) == v) return;
+    m_ch1SimConfig.waveform = static_cast<WaveformType>(v);
+    if (m_testMode && m_signalGen) m_signalGen->setCh1Waveform(v);
+    emit simulationChanged();
+}
+
+void ScopeController::setCh1Amplitude(double v) {
+    if (qFuzzyCompare(m_ch1SimConfig.amplitude, v)) return;
+    m_ch1SimConfig.amplitude = v;
+    if (m_testMode && m_signalGen) m_signalGen->setCh1Amplitude(v);
+    emit simulationChanged();
+}
+
+void ScopeController::setCh1Frequency(double v) {
+    if (qFuzzyCompare(m_ch1SimConfig.frequency, v)) return;
+    m_ch1SimConfig.frequency = v;
+    if (m_testMode && m_signalGen) m_signalGen->setCh1Frequency(v);
+    emit simulationChanged();
+}
+
+void ScopeController::setCh1Phase(double v) {
+    if (qFuzzyCompare(m_ch1SimConfig.phase, v)) return;
+    m_ch1SimConfig.phase = v;
+    if (m_testMode && m_signalGen) m_signalGen->setCh1Phase(v);
+    emit simulationChanged();
+}
+
+void ScopeController::setCh1DcOffset(double v) {
+    if (qFuzzyCompare(m_ch1SimConfig.dcOffset, v)) return;
+    m_ch1SimConfig.dcOffset = v;
+    if (m_testMode && m_signalGen) m_signalGen->setCh1DcOffset(v);
+    emit simulationChanged();
+}
+
+void ScopeController::setCh1DutyCycle(double v) {
+    if (qFuzzyCompare(m_ch1SimConfig.dutyCycle, v)) return;
+    m_ch1SimConfig.dutyCycle = v;
+    if (m_testMode && m_signalGen) m_signalGen->setCh1DutyCycle(v);
+    emit simulationChanged();
+}
+
+void ScopeController::setCh1Noise(double v) {
+    if (qFuzzyCompare(m_ch1SimConfig.noise, v)) return;
+    m_ch1SimConfig.noise = v;
+    if (m_testMode && m_signalGen) m_signalGen->setCh1Noise(v);
+    emit simulationChanged();
+}
+
+// --- Simulation config setters (CH2) ---
+
+void ScopeController::setCh2Waveform(int v) {
+    if (static_cast<int>(m_ch2SimConfig.waveform) == v) return;
+    m_ch2SimConfig.waveform = static_cast<WaveformType>(v);
+    if (m_testMode && m_signalGen) m_signalGen->setCh2Waveform(v);
+    emit simulationChanged();
+}
+
+void ScopeController::setCh2Amplitude(double v) {
+    if (qFuzzyCompare(m_ch2SimConfig.amplitude, v)) return;
+    m_ch2SimConfig.amplitude = v;
+    if (m_testMode && m_signalGen) m_signalGen->setCh2Amplitude(v);
+    emit simulationChanged();
+}
+
+void ScopeController::setCh2Frequency(double v) {
+    if (qFuzzyCompare(m_ch2SimConfig.frequency, v)) return;
+    m_ch2SimConfig.frequency = v;
+    if (m_testMode && m_signalGen) m_signalGen->setCh2Frequency(v);
+    emit simulationChanged();
+}
+
+void ScopeController::setCh2Phase(double v) {
+    if (qFuzzyCompare(m_ch2SimConfig.phase, v)) return;
+    m_ch2SimConfig.phase = v;
+    if (m_testMode && m_signalGen) m_signalGen->setCh2Phase(v);
+    emit simulationChanged();
+}
+
+void ScopeController::setCh2DcOffset(double v) {
+    if (qFuzzyCompare(m_ch2SimConfig.dcOffset, v)) return;
+    m_ch2SimConfig.dcOffset = v;
+    if (m_testMode && m_signalGen) m_signalGen->setCh2DcOffset(v);
+    emit simulationChanged();
+}
+
+void ScopeController::setCh2DutyCycle(double v) {
+    if (qFuzzyCompare(m_ch2SimConfig.dutyCycle, v)) return;
+    m_ch2SimConfig.dutyCycle = v;
+    if (m_testMode && m_signalGen) m_signalGen->setCh2DutyCycle(v);
+    emit simulationChanged();
+}
+
+void ScopeController::setCh2Noise(double v) {
+    if (qFuzzyCompare(m_ch2SimConfig.noise, v)) return;
+    m_ch2SimConfig.noise = v;
+    if (m_testMode && m_signalGen) m_signalGen->setCh2Noise(v);
+    emit simulationChanged();
+}
+
+// --- Direct series update from waveform buffer ---
 
 void ScopeController::updateSeriesFromWaveform(std::shared_ptr<WaveformBuffer> buf) {
     if (!buf) return;
@@ -405,10 +583,50 @@ void ScopeController::updateSeriesFromWaveform(std::shared_ptr<WaveformBuffer> b
 
 void ScopeController::setupSignalGenerator() {
     m_signalGen = std::make_unique<SignalGenerator>();
+
+    // Wire trigger status from generator to controller
+    connect(m_signalGen.get(), &SignalGenerator::triggerStatusChanged,
+            this, [this](const QString& status) {
+        if (m_triggerStatus != status) {
+            m_triggerStatus = status;
+            emit triggerStatusChanged();
+        }
+    }, Qt::QueuedConnection);
+
+    // Apply current state
     m_signalGen->setRunning(true);
     m_signalGen->setTriggerLevel(m_triggerLevel);
     m_signalGen->setTriggerSource(m_triggerSource);
     m_signalGen->setTriggerEdge(m_triggerEdge);
+    m_signalGen->setTriggerHoldoff(m_triggerHoldoff);
+    m_signalGen->setPreTriggerPercent(m_preTriggerPercent);
+    m_signalGen->setAcquisitionMode(m_acquisitionMode);
+
+    // Timebase
+    m_signalGen->setTimebaseSeconds(s_timebaseSteps[m_timebaseIndex]);
+    m_signalGen->setHorizontalPosition(m_horizontalPosition);
+
+    // Channel offsets
+    m_signalGen->setCh1Offset(m_ch1Offset);
+    m_signalGen->setCh2Offset(m_ch2Offset);
+
+    // Simulation config CH1
+    m_signalGen->setCh1Waveform(static_cast<int>(m_ch1SimConfig.waveform));
+    m_signalGen->setCh1Amplitude(m_ch1SimConfig.amplitude);
+    m_signalGen->setCh1Frequency(m_ch1SimConfig.frequency);
+    m_signalGen->setCh1Phase(m_ch1SimConfig.phase);
+    m_signalGen->setCh1DcOffset(m_ch1SimConfig.dcOffset);
+    m_signalGen->setCh1DutyCycle(m_ch1SimConfig.dutyCycle);
+    m_signalGen->setCh1Noise(m_ch1SimConfig.noise);
+
+    // Simulation config CH2
+    m_signalGen->setCh2Waveform(static_cast<int>(m_ch2SimConfig.waveform));
+    m_signalGen->setCh2Amplitude(m_ch2SimConfig.amplitude);
+    m_signalGen->setCh2Frequency(m_ch2SimConfig.frequency);
+    m_signalGen->setCh2Phase(m_ch2SimConfig.phase);
+    m_signalGen->setCh2DcOffset(m_ch2SimConfig.dcOffset);
+    m_signalGen->setCh2DutyCycle(m_ch2SimConfig.dutyCycle);
+    m_signalGen->setCh2Noise(m_ch2SimConfig.noise);
 
     // Re-register series if already set
     if (m_series1) m_signalGen->registerSeries(0, m_series1);

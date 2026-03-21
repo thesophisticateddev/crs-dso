@@ -118,7 +118,6 @@ ApplicationWindow {
                 property real ch1CursorLevel: 1.0
                 property real ch2CursorLevel: -1.0
 
-                // Fix #3: X-axis shows time, not samples
                 ValueAxis {
                     id: axisX
                     min: 0
@@ -163,7 +162,6 @@ ApplicationWindow {
                     useOpenGL: true
                 }
 
-                // Fix #7: Trigger line bound to scope (mode-agnostic)
                 LineSeries {
                     id: triggerLine
                     name: "Trigger"
@@ -301,12 +299,13 @@ ApplicationWindow {
                     }
                 }
 
-                // Fix #7: Mode-agnostic trigger update
                 function updateTriggerLevel(val) {
                     if (isNaN(val)) return;
                     val = Math.max(axisY.min, Math.min(axisY.max, val))
-                    triggerLine.replace(0, 0, val)
-                    triggerLine.replace(1, axisX.max, val)
+                    if (triggerLine.count >= 2) {
+                        triggerLine.replace(0, 0, val)
+                        triggerLine.replace(1, axisX.max, val)
+                    }
                     scope.triggerLevel = val
                 }
 
@@ -314,8 +313,10 @@ ApplicationWindow {
                     if (isNaN(val)) return;
                     val = Math.max(axisY.min, Math.min(axisY.max, val))
                     ch1CursorLevel = val
-                    ch1CursorLine.replace(0, 0, val)
-                    ch1CursorLine.replace(1, axisX.max, val)
+                    if (ch1CursorLine.count >= 2) {
+                        ch1CursorLine.replace(0, 0, val)
+                        ch1CursorLine.replace(1, axisX.max, val)
+                    }
                     if (!ch1CursorDragArea.drag.active)
                         ch1CursorHandle.y = mapToPosition(Qt.point(0, val)).y - 10
                 }
@@ -324,8 +325,10 @@ ApplicationWindow {
                     if (isNaN(val)) return;
                     val = Math.max(axisY.min, Math.min(axisY.max, val))
                     ch2CursorLevel = val
-                    ch2CursorLine.replace(0, 0, val)
-                    ch2CursorLine.replace(1, axisX.max, val)
+                    if (ch2CursorLine.count >= 2) {
+                        ch2CursorLine.replace(0, 0, val)
+                        ch2CursorLine.replace(1, axisX.max, val)
+                    }
                     if (!ch2CursorDragArea.drag.active)
                         ch2CursorHandle.y = mapToPosition(Qt.point(0, val)).y - 10
                 }
@@ -346,17 +349,24 @@ ApplicationWindow {
                 Connections {
                     target: scope
                     function onTriggerChanged() {
-                        if (!triggerDragArea.drag.active) {
+                        if (!triggerDragArea.drag.active && triggerLine.count >= 2) {
                             triggerHandle.y = chartView.mapToPosition(Qt.point(0, scope.triggerLevel)).y - 10
                             triggerLine.replace(0, 0, scope.triggerLevel)
                             triggerLine.replace(1, axisX.max, scope.triggerLevel)
                         }
                     }
                     function onTimebaseChanged() {
-                        // Update cursor/trigger line endpoints when timebase changes
-                        triggerLine.replace(1, axisX.max, scope.triggerLevel)
-                        ch1CursorLine.replace(1, axisX.max, chartView.ch1CursorLevel)
-                        ch2CursorLine.replace(1, axisX.max, chartView.ch2CursorLevel)
+                        if (triggerLine.count >= 2) {
+                            triggerLine.replace(1, axisX.max, scope.triggerLevel)
+                            ch1CursorLine.replace(1, axisX.max, chartView.ch1CursorLevel)
+                            ch2CursorLine.replace(1, axisX.max, chartView.ch2CursorLevel)
+                        }
+                    }
+                    function onHorizontalChanged() {
+                        var timebase = scope.timebaseSteps()[scope.timebaseIndex]
+                        var shift = scope.horizontalPosition * timebase
+                        axisX.min = shift
+                        axisX.max = shift + timebase * 10
                     }
                 }
 
@@ -383,7 +393,7 @@ ApplicationWindow {
                         anchors.horizontalCenter: parent.horizontalCenter
                         spacing: 15
 
-                        // --- Fix #6: Acquisition Mode Selector ---
+                        // --- Acquisition Mode Selector ---
                         RowLayout {
                             Layout.fillWidth: true
                             Layout.topMargin: 10
@@ -507,45 +517,252 @@ ApplicationWindow {
 
                         ColumnLayout {
                             Layout.fillWidth: true
-                            Text {
-                                text: "Level: " + scope.triggerLevel.toFixed(2) + " V"
-                                color: "yellow"
-                                font.pixelSize: 11
-                            }
-                            Slider {
-                                id: triggerLevelSlider
-                                from: -5; to: 5
+                            ControlStepper {
+                                id: triggerLevelControl
+                                label: "LEVEL"
+                                accentColor: "yellow"
                                 value: scope.triggerLevel
-                                Layout.fillWidth: true
-                                onMoved: chartView.updateTriggerLevel(value)
+                                min: axisY.min
+                                max: axisY.max
+                                step: 0.05
+                                inputStep: 0.05
+                                decimals: 2
+                                suffix: " V"
+                                showTextField: true
+                                onValueChanged: chartView.updateTriggerLevel(value)
+                            }
+                        }
 
-                                background: Rectangle {
-                                    x: triggerLevelSlider.leftPadding
-                                    y: triggerLevelSlider.topPadding + triggerLevelSlider.availableHeight / 2 - height / 2
-                                    width: triggerLevelSlider.availableWidth
-                                    height: 4
-                                    radius: 2
-                                    color: "#3d3d3d"
-
-                                    Rectangle {
-                                        width: triggerLevelSlider.visualPosition * parent.width
-                                        height: parent.height
-                                        color: "yellow"
-                                        radius: 2
-                                    }
+                        // --- Trigger Status ---
+                        Text {
+                            text: "Status: " + scope.triggerStatus
+                            color: {
+                                switch(scope.triggerStatus) {
+                                    case "Triggered": return "#4caf50"
+                                    case "Waiting": return "#ff9800"
+                                    case "Stopped": return "#f44336"
+                                    default: return "yellow"
                                 }
+                            }
+                            font.pixelSize: 11
+                        }
 
-                                handle: Rectangle {
-                                    x: triggerLevelSlider.leftPadding + triggerLevelSlider.visualPosition * (triggerLevelSlider.availableWidth - width)
-                                    y: triggerLevelSlider.topPadding + triggerLevelSlider.availableHeight / 2 - height / 2
-                                    width: 16; height: 16
-                                    radius: 8
-                                    color: "yellow"
-                                }
+                        // --- Force Trigger ---
+                        Button {
+                            text: "FORCE TRIGGER"
+                            Layout.fillWidth: true
+                            visible: scope.supportsForceTrigger
+                            onClicked: scope.forceTrigger()
+
+                            background: Rectangle {
+                                color: "#5d4037"
+                                border.color: "yellow"
+                                border.width: 1
+                                radius: 3
+                            }
+                            contentItem: Text {
+                                text: "FORCE TRIGGER"
+                                color: "yellow"
+                                font.pixelSize: 10
+                                font.bold: true
+                                horizontalAlignment: Text.AlignHCenter
                             }
                         }
 
                         Rectangle { height: 1; Layout.fillWidth: true; color: "#444" }
+
+                        // =============================================
+                        // --- SIMULATION CONTROLS (test mode only) ---
+                        // =============================================
+                        ColumnLayout {
+                            visible: scope.supportsWaveformEditor
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "SIMULATION"
+                                color: "#ff9800"
+                                font.bold: true
+                            }
+
+                            // --- CH1 Waveform ---
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+                                Text { text: "CH1:"; color: "#00ff00"; font.pixelSize: 11; font.bold: true }
+                                ComboBox {
+                                    id: ch1WaveCombo
+                                    model: scope.waveformTypes()
+                                    currentIndex: scope.ch1Waveform
+                                    Layout.fillWidth: true
+                                    onCurrentIndexChanged: scope.ch1Waveform = currentIndex
+
+                                    background: Rectangle {
+                                        color: "#3d3d3d"
+                                        border.color: "#00ff00"
+                                        border.width: 1
+                                        radius: 4
+                                    }
+                                    contentItem: Text {
+                                        text: ch1WaveCombo.displayText
+                                        color: "#00ff00"
+                                        verticalAlignment: Text.AlignVCenter
+                                        leftPadding: 8
+                                    }
+                                }
+                            }
+
+                            // CH1 Frequency
+                            ControlStepper {
+                                label: "CH1 FREQ"
+                                accentColor: "#00ff00"
+                                value: scope.ch1Frequency
+                                min: 1
+                                max: 100000
+                                step: 100
+                                inputStep: 1
+                                decimals: 0
+                                suffix: " Hz"
+                                showTextField: true
+                                onValueChanged: scope.ch1Frequency = value
+                            }
+
+                            // CH1 Amplitude
+                            ControlStepper {
+                                label: "CH1 AMPL"
+                                accentColor: "#00ff00"
+                                value: scope.ch1Amplitude
+                                min: 0.01
+                                max: 10.0
+                                step: 0.05
+                                inputStep: 0.01
+                                decimals: 2
+                                suffix: " V"
+                                showTextField: true
+                                onValueChanged: scope.ch1Amplitude = value
+                            }
+
+                            // CH1 Noise
+                            ControlStepper {
+                                label: "CH1 NOISE"
+                                accentColor: "#00ff00"
+                                value: scope.ch1Noise
+                                min: 0
+                                max: 2.0
+                                step: 0.05
+                                inputStep: 0.01
+                                decimals: 2
+                                suffix: " V"
+                                showTextField: true
+                                onValueChanged: scope.ch1Noise = value
+                            }
+
+                            // CH1 DC Offset
+                            ControlStepper {
+                                label: "CH1 DC OFFSET"
+                                accentColor: "#00ff00"
+                                value: scope.ch1DcOffset
+                                min: -5
+                                max: 5
+                                step: 0.05
+                                inputStep: 0.01
+                                decimals: 2
+                                suffix: " V"
+                                showTextField: true
+                                onValueChanged: scope.ch1DcOffset = value
+                            }
+
+                            Rectangle { height: 1; Layout.fillWidth: true; color: "#555" }
+
+                            // --- CH2 Waveform ---
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+                                Text { text: "CH2:"; color: "#00ffff"; font.pixelSize: 11; font.bold: true }
+                                ComboBox {
+                                    id: ch2WaveCombo
+                                    model: scope.waveformTypes()
+                                    currentIndex: scope.ch2Waveform
+                                    Layout.fillWidth: true
+                                    onCurrentIndexChanged: scope.ch2Waveform = currentIndex
+
+                                    background: Rectangle {
+                                        color: "#3d3d3d"
+                                        border.color: "#00ffff"
+                                        border.width: 1
+                                        radius: 4
+                                    }
+                                    contentItem: Text {
+                                        text: ch2WaveCombo.displayText
+                                        color: "#00ffff"
+                                        verticalAlignment: Text.AlignVCenter
+                                        leftPadding: 8
+                                    }
+                                }
+                            }
+
+                            // CH2 Frequency
+                            ControlStepper {
+                                label: "CH2 FREQ"
+                                accentColor: "#00ffff"
+                                value: scope.ch2Frequency
+                                min: 1
+                                max: 100000
+                                step: 100
+                                inputStep: 1
+                                decimals: 0
+                                suffix: " Hz"
+                                showTextField: true
+                                onValueChanged: scope.ch2Frequency = value
+                            }
+
+                            // CH2 Amplitude
+                            ControlStepper {
+                                label: "CH2 AMPL"
+                                accentColor: "#00ffff"
+                                value: scope.ch2Amplitude
+                                min: 0.01
+                                max: 10.0
+                                step: 0.05
+                                inputStep: 0.01
+                                decimals: 2
+                                suffix: " V"
+                                showTextField: true
+                                onValueChanged: scope.ch2Amplitude = value
+                            }
+
+                            // CH2 Noise
+                            ControlStepper {
+                                label: "CH2 NOISE"
+                                accentColor: "#00ffff"
+                                value: scope.ch2Noise
+                                min: 0
+                                max: 2.0
+                                step: 0.05
+                                inputStep: 0.01
+                                decimals: 2
+                                suffix: " V"
+                                showTextField: true
+                                onValueChanged: scope.ch2Noise = value
+                            }
+
+                            // CH2 DC Offset
+                            ControlStepper {
+                                label: "CH2 DC OFFSET"
+                                accentColor: "#00ffff"
+                                value: scope.ch2DcOffset
+                                min: -5
+                                max: 5
+                                step: 0.05
+                                inputStep: 0.01
+                                decimals: 2
+                                suffix: " V"
+                                showTextField: true
+                                onValueChanged: scope.ch2DcOffset = value
+                            }
+
+                            Rectangle { height: 1; Layout.fillWidth: true; color: "#444" }
+                        }
 
                         // --- Horizontal / Timebase ---
                         Text {
@@ -554,7 +771,6 @@ ApplicationWindow {
                             font.bold: true
                         }
 
-                        // Fix #2: Standard 1-2-5 timebase stepper
                         ControlStepper {
                             id: timebaseStepper
                             label: "TIME/DIV"
@@ -566,20 +782,20 @@ ApplicationWindow {
                             onValueChanged: scope.timebaseIndex = currentIndex
                         }
 
-                        // Fix #6: Horizontal position
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            Text { text: "H. Position:"; color: "#aaa"; font.pixelSize: 11 }
-                            Slider {
-                                id: hPositionSlider
-                                from: -5; to: 5; value: 0
-                                Layout.fillWidth: true
-                                onMoved: {
-                                    var shift = value * scope.timebaseSteps()[scope.timebaseIndex]
-                                    axisX.min = shift
-                                    axisX.max = shift + scope.timebaseSteps()[scope.timebaseIndex] * 10
-                                }
-                            }
+                        // Horizontal position (wired through controller)
+                        ControlStepper {
+                            id: hPositionControl
+                            label: "H. POSITION"
+                            accentColor: "#ffffff"
+                            value: scope.horizontalPosition
+                            min: -5
+                            max: 5
+                            step: 0.25
+                            inputStep: 0.01
+                            decimals: 2
+                            suffix: " div"
+                            showTextField: true
+                            onValueChanged: scope.horizontalPosition = value
                         }
 
                         Rectangle { height: 1; Layout.fillWidth: true; color: "#444" }
@@ -591,7 +807,7 @@ ApplicationWindow {
                             font.bold: true
                         }
 
-                        // Fix #6: Coupling Selector (AC / DC / GND)
+                        // Coupling Selector (AC / DC / GND)
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 4
@@ -635,23 +851,27 @@ ApplicationWindow {
                                 var maxV = Math.max(value, vScale2.value)
                                 axisY.max = maxV
                                 axisY.min = -maxV
-                                triggerLevelSlider.from = -maxV
-                                triggerLevelSlider.to = maxV
+                                triggerLevelControl.min = -maxV
+                                triggerLevelControl.max = maxV
                                 axisY.labelFormat = (value < 1.0 || vScale2.value < 1.0) ? "%.3f V" : "%.1f V"
                                 Qt.callLater(chartView.repositionHandles)
                             }
                         }
 
-                        // Fix #6: Channel offset (vertical position)
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Text { text: "Position:"; color: "#aaa"; font.pixelSize: 11 }
-                            Slider {
-                                id: ch1OffsetSlider
-                                from: -5.0; to: 5.0; value: scope.ch1Offset
-                                Layout.fillWidth: true
-                                onMoved: scope.ch1Offset = value
-                            }
+                        // Channel offset (vertical position)
+                        ControlStepper {
+                            id: ch1OffsetControl
+                            label: "POSITION"
+                            accentColor: "#00ff00"
+                            value: scope.ch1Offset
+                            min: -5.0
+                            max: 5.0
+                            step: 0.05
+                            inputStep: 0.01
+                            decimals: 2
+                            suffix: " V"
+                            showTextField: true
+                            onValueChanged: scope.ch1Offset = value
                         }
 
                         CheckBox {
@@ -672,7 +892,7 @@ ApplicationWindow {
                             font.bold: true
                         }
 
-                        // Fix #6: Coupling Selector (AC / DC / GND)
+                        // Coupling Selector (AC / DC / GND)
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 4
@@ -716,23 +936,27 @@ ApplicationWindow {
                                 var maxV = Math.max(value, vScale1.value)
                                 axisY.max = maxV
                                 axisY.min = -maxV
-                                triggerLevelSlider.from = -maxV
-                                triggerLevelSlider.to = maxV
+                                triggerLevelControl.min = -maxV
+                                triggerLevelControl.max = maxV
                                 axisY.labelFormat = (value < 1.0 || vScale1.value < 1.0) ? "%.3f V" : "%.1f V"
                                 Qt.callLater(chartView.repositionHandles)
                             }
                         }
 
-                        // Fix #6: Channel offset (vertical position)
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Text { text: "Position:"; color: "#aaa"; font.pixelSize: 11 }
-                            Slider {
-                                id: ch2OffsetSlider
-                                from: -5.0; to: 5.0; value: scope.ch2Offset
-                                Layout.fillWidth: true
-                                onMoved: scope.ch2Offset = value
-                            }
+                        // Channel offset (vertical position)
+                        ControlStepper {
+                            id: ch2OffsetControl
+                            label: "POSITION"
+                            accentColor: "#00ffff"
+                            value: scope.ch2Offset
+                            min: -5.0
+                            max: 5.0
+                            step: 0.05
+                            inputStep: 0.01
+                            decimals: 2
+                            suffix: " V"
+                            showTextField: true
+                            onValueChanged: scope.ch2Offset = value
                         }
 
                         CheckBox {
@@ -767,7 +991,7 @@ ApplicationWindow {
 
                         RowLayout {
                             Layout.fillWidth: true
-                            Text { text: "ΔV:"; color: "#fff"; font.pixelSize: 11; Layout.preferredWidth: 24 }
+                            Text { text: "\u0394V:"; color: "#fff"; font.pixelSize: 11; Layout.preferredWidth: 24 }
                             Text {
                                 text: (chartView.ch1CursorLevel - chartView.ch2CursorLevel).toFixed(3) + " V"
                                 color: "#aaa"
@@ -781,7 +1005,7 @@ ApplicationWindow {
                             text: "AUTOSET"
                             Layout.fillWidth: true
                             onClicked: {
-                                scope.timebaseIndex = 12  // 1 ms/div
+                                scope.timebaseIndex = 16  // 1 ms/div
                                 scope.ch1VoltsIndex = 9   // 1 V/div
                                 scope.ch2VoltsIndex = 9
                                 scope.triggerLevel = 0
@@ -789,10 +1013,11 @@ ApplicationWindow {
                                 scope.triggerEdge = 0
                                 scope.ch1Offset = 0
                                 scope.ch2Offset = 0
-                                hPositionSlider.value = 0
+                                scope.horizontalPosition = 0
+                                hPositionControl.value = 0
                                 vScale1.value = scope.voltsPerDivSteps()[9]
                                 vScale2.value = scope.voltsPerDivSteps()[9]
-                                timebaseStepper.value = scope.timebaseSteps()[12]
+                                timebaseStepper.value = scope.timebaseSteps()[16]
                                 chartView.updateCh1Cursor(1.0)
                                 chartView.updateCh2Cursor(-1.0)
                             }
