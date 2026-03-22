@@ -2,6 +2,7 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 import QtCharts
+import Qt.labs.settings
 
 ApplicationWindow {
     id: window
@@ -10,6 +11,12 @@ ApplicationWindow {
     visible: true
     title: qsTr("Dual Channel Digital Sampling Oscilloscope")
     color: "#1a1a1a"
+
+    Settings {
+        id: controlPanelSettings
+        category: "ControlPanel"
+        property int width: 300
+    }
 
     // --- Menu Bar ---
     menuBar: MenuBar {
@@ -100,16 +107,34 @@ ApplicationWindow {
         }
 
         // --- Content area ---
-        RowLayout {
+        SplitView {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 0
+            orientation: Qt.Horizontal
+
+            handle: Rectangle {
+                implicitWidth: 8
+                implicitHeight: 8
+                color: SplitHandle.pressed ? "#5a5a5a"
+                     : SplitHandle.hovered ? "#4a4a4a"
+                     : "#3d3d3d"
+
+                Rectangle {
+                    width: 2
+                    height: 30
+                    radius: 1
+                    anchors.centerIn: parent
+                    color: SplitHandle.pressed ? "#999"
+                         : SplitHandle.hovered ? "#888"
+                         : "#666"
+                }
+            }
 
             // --- 1. Waveform Display ---
             ChartView {
                 id: chartView
-                Layout.fillWidth: true
-                Layout.fillHeight: true
+                SplitView.fillWidth: true
+                SplitView.minimumWidth: 200
                 theme: ChartView.ChartThemeDark
                 antialiasing: true
                 legend.visible: true
@@ -378,10 +403,16 @@ ApplicationWindow {
 
             // --- 2. Control Panel ---
             Rectangle {
-                Layout.preferredWidth: 260
-                Layout.fillHeight: true
+                SplitView.preferredWidth: controlPanelSettings.width
+                SplitView.minimumWidth: 240
+                SplitView.maximumWidth: 420
                 color: "#2d2d2d"
                 border.color: "#3d3d3d"
+
+                onWidthChanged: {
+                    if (width >= 240 && width <= 420)
+                        controlPanelSettings.width = width
+                }
 
                 ScrollView {
                     anchors.fill: parent
