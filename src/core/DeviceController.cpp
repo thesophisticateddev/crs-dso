@@ -76,11 +76,14 @@ void DeviceController::scanDevices() {
         map["product"] = QString::fromStdString(dev.product);
         deviceList.append(map);
     }
-
+    // emit event to notify if there are devices detected by the scanner
     emit devicesScanned(deviceList);
 }
 
 QVariantList DeviceController::availableDevices() const {
+    
+    // Get all the available USB devices 
+    
     QVariantList deviceList;
     for (const auto& dev : m_discoveredDevices) {
         QVariantMap map;
