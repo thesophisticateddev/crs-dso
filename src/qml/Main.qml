@@ -148,14 +148,14 @@ ApplicationWindow {
                     min: 0
                     max: {
                         var steps = scope.timebaseSteps()
-                        return steps[scope.timebaseIndex] * 10
+                        return steps[scope.timebaseIndex] * 10 * scope.timeDisplayScale
                     }
                     labelFormat: {
-                        var total = max
-                        if (total < 1e-5)      return "%.0f ns"
-                        else if (total < 1e-2) return "%.0f us"
-                        else if (total < 10.0) return "%.0f ms"
-                        else                   return "%.1f s"
+                        var unit = scope.timeDisplayUnit
+                        if (scope.timeDisplayScale >= 1e9) return "%.0f " + unit
+                        else if (scope.timeDisplayScale >= 1e6) return "%.0f " + unit
+                        else if (scope.timeDisplayScale >= 1e3) return "%.0f " + unit
+                        else return "%.1f " + unit
                     }
                     titleText: scope.timebaseLabel
                     tickCount: 11

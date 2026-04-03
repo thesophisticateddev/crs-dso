@@ -62,6 +62,7 @@ public slots:
     void setSampleRate(double rate) { m_sampleRate = rate; }
     void setTimebaseSeconds(double s) { m_timebaseSeconds = s; }
     void setHorizontalPosition(double divs) { m_horizontalPosition = divs; }
+    void setTimeDisplayScale(double s) { m_timeDisplayScale = s; }
 
     // Per-channel simulation config
     void setCh1Waveform(int w) { m_ch1Config.waveform = static_cast<WaveformType>(w); }
@@ -104,6 +105,7 @@ private:
     double m_sampleRate = 1e6;
     double m_timebaseSeconds = 1e-3;
     double m_horizontalPosition = 0.0;
+    double m_timeDisplayScale = 1e3; // default matches 1ms/div -> display in ms
 
     // Channel state
     double m_ch1Offset = 0.0;
@@ -164,6 +166,7 @@ public:
     void setSampleRate(double rate);
     void setTimebaseSeconds(double s);
     void setHorizontalPosition(double divs);
+    void setTimeDisplayScale(double s);
 
     // Channel offsets
     void setCh1Offset(double v);

@@ -128,6 +128,11 @@ void SignalGenerator::setTimebaseSeconds(double s) {
                               Qt::QueuedConnection, Q_ARG(double, s));
 }
 
+void SignalGenerator::setTimeDisplayScale(double s) {
+    QMetaObject::invokeMethod(m_worker, "setTimeDisplayScale",
+                              Qt::QueuedConnection, Q_ARG(double, s));
+}
+
 void SignalGenerator::setHorizontalPosition(double divs) {
     QMetaObject::invokeMethod(m_worker, "setHorizontalPosition",
                               Qt::QueuedConnection, Q_ARG(double, divs));
@@ -384,7 +389,7 @@ void SignalWorker::generateData() {
     double timePerPoint = totalTime / targetPoints;
 
     for (int b = 0; b < targetPoints; ++b) {
-        double displayTime = b * timePerPoint;
+        double displayTime = b * timePerPoint * m_timeDisplayScale;
 
         if (m_ch1Active) {
             double maxV = -1e9, minV = 1e9;

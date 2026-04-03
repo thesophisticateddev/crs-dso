@@ -40,6 +40,10 @@ class ScopeController : public QObject {
     Q_PROPERTY(double horizontalPosition READ horizontalPosition
                WRITE setHorizontalPosition NOTIFY horizontalChanged)
 
+    // X-axis display scaling (seconds -> display unit)
+    Q_PROPERTY(double timeDisplayScale READ timeDisplayScale NOTIFY timebaseChanged)
+    Q_PROPERTY(QString timeDisplayUnit READ timeDisplayUnit NOTIFY timebaseChanged)
+
     // Channel 1
     Q_PROPERTY(bool ch1Enabled READ ch1Enabled WRITE setCh1Enabled
                NOTIFY channelChanged)
@@ -129,6 +133,8 @@ public:
     int timebaseIndex() const;
     QString timebaseLabel() const;
     double horizontalPosition() const;
+    double timeDisplayScale() const;
+    QString timeDisplayUnit() const;
 
     bool ch1Enabled() const;
     int ch1VoltsIndex() const;
@@ -263,6 +269,7 @@ private:
 
     // Device scanning
     std::vector<DeviceInfo> m_discoveredDevices;
+    uint32_t m_scanGeneration = 0;
 
     void updateSeriesFromWaveform(std::shared_ptr<WaveformBuffer> buf);
     void setupSignalGenerator();

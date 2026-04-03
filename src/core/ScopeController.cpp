@@ -68,6 +68,8 @@ void ScopeController::scanDevices() {
     m_statusText = "Scanning for devices...";
     emit statusChanged();
 
+    uint32_t generation = ++m_scanGeneration;
+
     auto future = QtConcurrent::run([]() -> std::vector<DeviceInfo> {
 #ifdef HAS_LIBUSB
         UsbTransport usb;
@@ -80,7 +82,14 @@ void ScopeController::scanDevices() {
 
     auto* watcher = new QFutureWatcher<std::vector<DeviceInfo>>(this);
     connect(watcher, &QFutureWatcher<std::vector<DeviceInfo>>::finished,
-            this, [this, watcher]() {
+            this, [this, watcher, generation]() {
+        watcher->deleteLater();
+
+        // Ignore stale scan results (user switched back to test mode, or a new scan started)
+        if (generation != m_scanGeneration || m_testMode) {
+            return;
+        }
+
         m_discoveredDevices = watcher->result();
         if (m_discoveredDevices.empty()) {
             m_statusText = "No devices found";
@@ -89,7 +98,6 @@ void ScopeController::scanDevices() {
             connectToFirstDevice();
         }
         emit statusChanged();
-        watcher->deleteLater();
     });
     watcher->setFuture(future);
 }
@@ -185,6 +193,24 @@ QString ScopeController::timebaseLabel() const {
     else                 return QString::number(val, 'f', 0) + " s/div";
 }
 
+// --- X-axis display scaling ---
+
+double ScopeController::timeDisplayScale() const {
+    double val = s_timebaseSteps[m_timebaseIndex] * 10.0; // total time span
+    if (val < 1e-5)      return 1e9;  // seconds -> nanoseconds
+    else if (val < 1e-2) return 1e6;  // seconds -> microseconds
+    else if (val < 10.0) return 1e3;  // seconds -> milliseconds
+    else                 return 1.0;  // seconds
+}
+
+QString ScopeController::timeDisplayUnit() const {
+    double val = s_timebaseSteps[m_timebaseIndex] * 10.0;
+    if (val < 1e-5)      return QStringLiteral("ns");
+    else if (val < 1e-2) return QStringLiteral("us");
+    else if (val < 10.0) return QStringLiteral("ms");
+    else                 return QStringLiteral("s");
+}
+
 // --- Getters ---
 
 bool ScopeController::testMode() const { return m_testMode; }
@@ -236,7 +262,8 @@ void ScopeController::setTestMode(bool v) {
     m_testMode = v;
 
     if (v) {
-        // Switch to test mode
+        // Switch to test mode — invalidate any in-flight device scans
+        ++m_scanGeneration;
         if (m_engine) {
             m_engine->stopAcquisition();
             m_engine->requestStop();
@@ -265,16 +292,22 @@ void ScopeController::setRunning(bool v) {
     if (m_testMode) {
         m_running = v;
         if (m_signalGen) m_signalGen->setRunning(v);
+        emit runningChanged();
     } else {
         if (v) {
-            if (m_engine) m_engine->startAcquisition(static_cast<AcquisitionMode>(m_acquisitionMode));
-            m_running = true;
+            // Don't set m_running here — wait for engine stateChanged to confirm
+            if (m_engine) {
+                m_engine->startAcquisition(static_cast<AcquisitionMode>(m_acquisitionMode));
+            } else {
+                // No engine connected — cannot start
+                return;
+            }
         } else {
             if (m_engine) m_engine->stopAcquisition();
             m_running = false;
+            emit runningChanged();
         }
     }
-    emit runningChanged();
 }
 
 void ScopeController::setTriggerSource(int v) {
@@ -351,6 +384,7 @@ void ScopeController::setTimebaseIndex(int v) {
 
     if (m_testMode && m_signalGen) {
         m_signalGen->setTimebaseSeconds(secs);
+        m_signalGen->setTimeDisplayScale(timeDisplayScale());
     } else if (m_engine) {
         uint32_t nsPerDiv = static_cast<uint32_t>(secs * 1e9);
         m_engine->setTimebase(nsPerDiv);
@@ -555,6 +589,7 @@ void ScopeController::updateSeriesFromWaveform(std::shared_ptr<WaveformBuffer> b
 
     double timePerDiv = s_timebaseSteps[m_timebaseIndex];
     double totalTime = timePerDiv * 10.0;
+    double scale = timeDisplayScale();
 
     if (m_series1 && buf->channels.size() > 0) {
         const auto& raw = buf->channels[0];
@@ -562,7 +597,7 @@ void ScopeController::updateSeriesFromWaveform(std::shared_ptr<WaveformBuffer> b
         points.reserve(static_cast<int>(raw.size()));
         double dt = totalTime / raw.size();
         for (size_t i = 0; i < raw.size(); i++) {
-            points.append(QPointF(i * dt, buf->toVoltage(raw[i])));
+            points.append(QPointF(i * dt * scale, buf->toVoltage(raw[i])));
         }
         m_series1->replace(points);
     }
@@ -573,7 +608,7 @@ void ScopeController::updateSeriesFromWaveform(std::shared_ptr<WaveformBuffer> b
         points.reserve(static_cast<int>(raw.size()));
         double dt = totalTime / raw.size();
         for (size_t i = 0; i < raw.size(); i++) {
-            points.append(QPointF(i * dt, buf->toVoltage(raw[i])));
+            points.append(QPointF(i * dt * scale, buf->toVoltage(raw[i])));
         }
         m_series2->replace(points);
     }
@@ -604,6 +639,7 @@ void ScopeController::setupSignalGenerator() {
 
     // Timebase
     m_signalGen->setTimebaseSeconds(s_timebaseSteps[m_timebaseIndex]);
+    m_signalGen->setTimeDisplayScale(timeDisplayScale());
     m_signalGen->setHorizontalPosition(m_horizontalPosition);
 
     // Channel offsets
