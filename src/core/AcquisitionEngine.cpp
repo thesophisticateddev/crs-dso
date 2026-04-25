@@ -11,13 +11,14 @@ AcquisitionEngine::AcquisitionEngine(std::unique_ptr<ITransport> transport,
 }
 
 AcquisitionEngine::~AcquisitionEngine() {
+    // Queue a clean disconnect if still connected, then stop the thread
+    if (m_transport && m_transport->state() == TransportState::Connected) {
+        queueCommand(InternalCmd::DISCONNECT);
+    }
     requestStop();
     if (isRunning()) {
         quit();
         wait(5000);
-    }
-    if (m_transport && m_transport->state() == TransportState::Connected) {
-        m_transport->close();
     }
 }
 
@@ -26,38 +27,33 @@ EngineState AcquisitionEngine::currentState() const {
 }
 
 void AcquisitionEngine::connectDevice(const DeviceInfo& info) {
-    if (m_transport->open(info)) {
-        setState(EngineState::Idle);
-        emit connectionChanged(true);
-
-        // Send IDENTIFY command
-        queueCommand(Cmd::IDENTIFY);
-
-        // Start the acquisition thread if not running
-        if (!isRunning()) {
-            m_stopRequested = false;
-            start();
-        }
-    } else {
-        setState(EngineState::Error);
-        emit errorOccurred(QString::fromStdString(m_transport->lastError()));
+    // Queue the connect to run on the engine thread
+    {
+        QMutexLocker locker(&m_cmdMutex);
+        m_pendingDeviceInfo = info;
     }
+
+    // Start the acquisition thread if not running
+    if (!isRunning()) {
+        m_stopRequested = false;
+        start();
+    }
+
+    queueCommand(InternalCmd::CONNECT);
 }
 
 void AcquisitionEngine::disconnectDevice() {
-    // Queue stop then close
+    // Queue stop + disconnect to run on the engine thread
     if (m_state == EngineState::Armed || m_state == EngineState::Acquiring) {
         queueCommand(Cmd::STOP_ACQUISITION);
     }
+    queueCommand(InternalCmd::DISCONNECT);
+
+    // Wait for thread to process the disconnect and stop
     requestStop();
     if (isRunning()) {
         wait(3000);
     }
-    if (m_transport) {
-        m_transport->close();
-    }
-    setState(EngineState::Disconnected);
-    emit connectionChanged(false);
 }
 
 void AcquisitionEngine::setSampleRate(uint32_t samplesPerSec) {
@@ -119,13 +115,13 @@ void AcquisitionEngine::requestStop() {
 void AcquisitionEngine::run() {
     // Main acquisition loop
     while (!m_stopRequested) {
+        // Always process pending commands (including internal connect/disconnect)
+        processPendingCommands();
+
         if (m_transport->state() != TransportState::Connected) {
             QThread::msleep(100);
             continue;
         }
-
-        // Send pending commands
-        processPendingCommands();
 
         // Read incoming data
         processIncoming();
@@ -156,7 +152,35 @@ void AcquisitionEngine::processPendingCommands() {
     }
 
     for (const auto& cmd : commands) {
-        sendCommand(cmd.id, cmd.payload);
+        if (cmd.id == InternalCmd::CONNECT || cmd.id == InternalCmd::DISCONNECT) {
+            handleInternalCommand(cmd);
+        } else {
+            sendCommand(cmd.id, cmd.payload);
+        }
+    }
+}
+
+void AcquisitionEngine::handleInternalCommand(const Command& cmd) {
+    if (cmd.id == InternalCmd::CONNECT) {
+        DeviceInfo info;
+        {
+            QMutexLocker locker(&m_cmdMutex);
+            info = m_pendingDeviceInfo;
+        }
+        if (m_transport->open(info)) {
+            setState(EngineState::Idle);
+            emit connectionChanged(true);
+            sendCommand(Cmd::IDENTIFY);
+        } else {
+            setState(EngineState::Error);
+            emit errorOccurred(QString::fromStdString(m_transport->lastError()));
+        }
+    } else if (cmd.id == InternalCmd::DISCONNECT) {
+        if (m_transport) {
+            m_transport->close();
+        }
+        setState(EngineState::Disconnected);
+        emit connectionChanged(false);
     }
 }
 
@@ -192,6 +216,13 @@ void AcquisitionEngine::handleFrame(const ProtocolFrame& frame) {
         WaveformHeader header;
         std::memcpy(&header, frame.payload.data(), sizeof(WaveformHeader));
 
+        // Validate bitsPerSample — only 8 and 16 are currently supported
+        if (header.bitsPerSample != 8 && header.bitsPerSample != 16) {
+            emit errorOccurred(QString("Unsupported sample width: %1 bits")
+                .arg(header.bitsPerSample));
+            break;
+        }
+
         auto waveform = std::make_shared<WaveformBuffer>();
         waveform->channelMask = header.channelMask;
         waveform->sampleRate = header.sampleRateHz;
@@ -206,20 +237,39 @@ void AcquisitionEngine::handleFrame(const ProtocolFrame& frame) {
                 numChannels++;
         }
 
+        const uint8_t* rawData = frame.payload.data() + sizeof(WaveformHeader);
+        size_t rawBytes = frame.payload.size() - sizeof(WaveformHeader);
+
         if (numChannels > 0 && header.numSamples > 0) {
-            const int16_t* sampleData = reinterpret_cast<const int16_t*>(
-                frame.payload.data() + sizeof(WaveformHeader));
-            size_t totalSamples = (frame.payload.size() - sizeof(WaveformHeader)) / sizeof(int16_t);
-
             waveform->channels.resize(numChannels);
-            size_t samplesPerChannel = std::min(
-                static_cast<size_t>(header.numSamples),
-                totalSamples / numChannels);
 
-            for (int ch = 0; ch < numChannels; ch++) {
-                waveform->channels[ch].assign(
-                    sampleData + ch * samplesPerChannel,
-                    sampleData + (ch + 1) * samplesPerChannel);
+            if (header.bitsPerSample == 16) {
+                size_t totalSamples = rawBytes / sizeof(int16_t);
+                size_t samplesPerChannel = std::min(
+                    static_cast<size_t>(header.numSamples),
+                    totalSamples / numChannels);
+
+                const int16_t* sampleData = reinterpret_cast<const int16_t*>(rawData);
+                for (int ch = 0; ch < numChannels; ch++) {
+                    waveform->channels[ch].assign(
+                        sampleData + ch * samplesPerChannel,
+                        sampleData + (ch + 1) * samplesPerChannel);
+                }
+            } else if (header.bitsPerSample == 8) {
+                size_t totalSamples = rawBytes;
+                size_t samplesPerChannel = std::min(
+                    static_cast<size_t>(header.numSamples),
+                    totalSamples / numChannels);
+
+                for (int ch = 0; ch < numChannels; ch++) {
+                    const uint8_t* src = rawData + ch * samplesPerChannel;
+                    waveform->channels[ch].resize(samplesPerChannel);
+                    for (size_t i = 0; i < samplesPerChannel; i++) {
+                        // Sign-extend 8-bit sample to int16_t
+                        waveform->channels[ch][i] = static_cast<int16_t>(
+                            static_cast<int8_t>(src[i]));
+                    }
+                }
             }
         }
 

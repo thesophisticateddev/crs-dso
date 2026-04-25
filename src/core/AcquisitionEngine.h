@@ -16,6 +16,12 @@ enum class AcquisitionMode {
     Auto, Normal, Single
 };
 
+// Internal command IDs (not sent over wire — handled inside the engine thread)
+namespace InternalCmd {
+    constexpr uint8_t CONNECT    = 0xF0;
+    constexpr uint8_t DISCONNECT = 0xF1;
+}
+
 class AcquisitionEngine : public QThread {
     Q_OBJECT
 
@@ -67,8 +73,12 @@ private:
     QMutex m_cmdMutex;
     std::vector<Command> m_pendingCommands;
 
+    // Pending device info for connect (protected by m_cmdMutex)
+    DeviceInfo m_pendingDeviceInfo;
+
     void processIncoming();
     void processPendingCommands();
+    void handleInternalCommand(const Command& cmd);
     void handleFrame(const ProtocolFrame& frame);
     void sendCommand(uint8_t cmdId,
                      const std::vector<uint8_t>& payload = {});

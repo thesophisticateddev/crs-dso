@@ -3,6 +3,7 @@
 #include <QQmlContext>
 #include <QThread>
 #include <QIcon>
+#include <QQuickWindow>
 #include <QtQml>
 #include "core/ScopeController.h"
 
@@ -19,6 +20,11 @@ int main(int argc, char *argv[]) {
 
     const QUrl url(u"qrc:/crs_dso/qml/Main.qml"_qs);
     engine.load(url);
+
+    // Set icon on QML window (needed for Linux window managers)
+    if (QQuickWindow *window = qobject_cast<QQuickWindow *>(engine.rootObjects().value(0))) {
+        window->setIcon(QIcon(":/icons/crs-dso.png"));
+    }
 
     return app.exec();
 }
